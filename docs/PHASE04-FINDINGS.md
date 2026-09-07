@@ -137,11 +137,27 @@ run_thread_function          <- ultramodern scheduling the game's thread
 With threading handed over, the next faults were all the same shape: a read a
 few bytes into a null pointer, deep in the game's libultra.
 
-| Function | Fault | What it is |
-|---|---|---|
-| `func_8000D080` | reads null+4 | `osGetThreadPri` |
-| `func_8000D430` | reads null+4 | `osSetThreadPri` |
-| (next) | writes null+0x12 | not yet identified |
+| Function | Fault | Identified as | How |
+|---|---|---|---|
+| `func_8000D080` | reads null+4 | `osGetThreadPri` | null-defaults to `__osRunningThread`, returns priority at 0x4 |
+| `func_8000D430` | reads null+4 | `osSetThreadPri` | same, two args, inside a critical section |
+| `func_800040F0` | writes null+0x12 | `osRecvMesg` | blocks while `validCount == 0`, copies `msg[first]` out |
+| `func_8000D2C0` | reads null+0 | `osSendMesg` | index `(first + validCount) % msgCount` -- appends |
+| `func_8000D130` | — | `osJamMesg` | index `(first + msgCount - 1) % msgCount` -- prepends |
+| `func_80003DC0` | — | `osCreateMesgQueue` | six-field init, sentinel into `mtqueue`/`fullqueue` |
+| `func_80003EC0` | — | `osGetThreadId` | as `osGetThreadPri`, reading id at 0x14 |
+
+Two of these are worth keeping in mind when reading future faults.
+
+**`osSendMesg` and `osJamMesg` are nearly identical** and are told apart only by
+the insert index: send needs `validCount` to append at the tail and loads it;
+jam does not, and adds `first + msgCount` to prepend at the head. Everything
+before that -- the blocking, the NOBLOCK return, the yield -- is the same code.
+
+**A fault's offset does not match the offset in the instruction** for anything
+narrower than a word. `osRecvMesg` faulted at null+0x12 while the instruction is
+`sh $s3, 0x10($v0)`, because `MEM_H` XORs the address by 2 (and `MEM_B` by 3) for
+big-endian byte ordering. Subtract that before looking for the field.
 
 The cause is one thing, not three. `osGetThreadPri` is
 `if (t == NULL) t = __osRunningThread; return t->priority;`. The game's
@@ -157,10 +173,19 @@ on the game thread) identifies the class instantly.
 
 ## Where it stops now
 
-The game thread now runs real code under ultramodern's scheduler and gets
-several calls deep before faulting on the next unnamed libultra threading
-routine. Still no display lists, so nothing renders yet -- but the reason is now
-known and specific rather than a black screen with no explanation.
+The threading and message-queue layer is now the runtime's, and boot has moved
+past it: the current fault is at offset `0x24400010` from RDRAM, which is
+`0xA4400010` -- **VI_CURRENT**. Back to a hardware register, and out of the
+null-pointer class entirely.
+
+That is the frontier: the Video Interface. `func_80011480` reads VI_CURRENT and
+`func_80008300` writes the whole VI register block, so the next names to prove
+are around `osViGetCurrentLine`, `osViSetMode`/`osViSwapBuffer` and the VI
+manager. The public/private rule from earlier in this phase applies again --
+`osViSwapBuffer` is reimplemented while `__osViSwapContext` is not, so the win
+is naming the public entry point and letting the manager beneath it go away.
+
+Still no display lists, so nothing renders yet.
 
 So execution is proceeding and **nothing is reaching the renderer**. The next
 question is which of these it is, and they are distinguishable:

@@ -207,3 +207,45 @@ osGetThreadPri = 0x8000D080; // type:func
 // in 30 places in the boot segment. The game's entire libultra threading layer
 // has to become the runtime's, not just the handful named so far.
 osSetThreadPri = 0x8000D430; // type:func
+
+// ---------------------------------------------------------------------------
+// Message queues and thread identity. Same cause as the pair above: these read
+// or write scheduler state that ultramodern now owns, so recompiling them means
+// touching structures nothing maintains.
+// ---------------------------------------------------------------------------
+
+// Initialises six fields of an OSMesgQueue: mtqueue and fullqueue both point at
+// the thread-tail sentinel (D_8001A330), then validCount = 0 at 0x8, first = 0
+// at 0xC, msgCount = a2 at 0x10 and msg = a1 at 0x14. That field-for-field
+// sequence is osCreateMesgQueue.
+osCreateMesgQueue = 0x80003DC0; // type:func
+
+// `if (t == NULL) t = __osRunningThread; return t->id;` -- the same shape as
+// osGetThreadPri, reading offset 0x14 instead of 0x4. The OSThread layout is
+// corroborated three ways now: priority at 0x4, state at 0x10, id at 0x14.
+osGetThreadId = 0x80003EC0; // type:func
+
+// osRecvMesg(mq, msg, flag). Reads validCount at 0x8; returns -1 immediately if
+// the queue is empty and the flag is NOBLOCK; otherwise sets the running
+// thread's state to OS_STATE_WAITING (8) and enqueues-and-yields, re-checking
+// on wake; then copies msg[first] out through a1.
+//
+// This is what was crashing: `sh $s3, 0x10($v0)` writes the state field of
+// __osRunningThread, which is null. The reported fault offset was 0x12 rather
+// than 0x10 because MEM_H XORs the address by 2 for halfword access -- worth
+// remembering when reading these, since the offset in the fault will not match
+// the offset in the instruction for anything narrower than a word.
+osRecvMesg = 0x800040F0; // type:func
+
+// The osSendMesg / osJamMesg pair. Both block while validCount >= msgCount,
+// both set the running thread to OS_STATE_WAITING and enqueue-and-yield, and
+// both return -1 when the queue is full and the flag is NOBLOCK -- so the
+// preambles are interchangeable. They are told apart by the insert index:
+//
+//   osSendMesg  loads first (0xC), validCount (0x8) AND msgCount (0x10) to
+//               compute (first + validCount) % msgCount -- append at the tail.
+//   osJamMesg   loads only first and msgCount and adds them, computing
+//               (first + msgCount - 1) % msgCount -- prepend at the head. It
+//               has no use for validCount in the index, and does not load it.
+osSendMesg = 0x8000D2C0; // type:func
+osJamMesg  = 0x8000D130; // type:func
