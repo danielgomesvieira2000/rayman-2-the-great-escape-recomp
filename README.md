@@ -4,7 +4,13 @@ A **native PC port of _Rayman 2: The Great Escape_ (N64, USA)**, built by
 **static recompilation** with the [N64Recomp][N64Recomp] toolchain — the same
 approach behind [Zelda 64: Recompiled](https://github.com/Zelda64Recomp/Zelda64Recomp).
 
-> **Status: phase 02 complete — the game recompiles.** The ROM splits into an
+> **Status: phase 03 in progress — it builds, it does not yet run.** The port
+> now compiles and links into an executable and RT64 brings up Direct3D 12, but
+> the process stops on the renderer thread before the game starts, so
+> **`recomp_entrypoint` has not been reached**. Details and the next step are in
+> **[docs/PHASE03-FINDINGS.md](docs/PHASE03-FINDINGS.md)**.
+>
+> **Phase 02 complete — the game recompiles.** The ROM splits into an
 > assembly-only ELF whose three code segments are **byte-identical** to the
 > cartridge (850,464 bytes), and N64Recomp translates all **4,580** functions
 > into C that compiles into a **5.2 MB static library** exporting 3,267
@@ -77,7 +83,8 @@ rayman-2-the-great-escape-recomp/
 │   ├── PLAN.md                 # the phased build plan and its gates
 │   ├── PHASE00-FINDINGS.md     # what the cartridge says, and how it was measured
 │   ├── PHASE01-FINDINGS.md     # the segment map, and how the ROM was split
-│   └── PHASE02-FINDINGS.md     # the recompile, and five silent defects
+│   ├── PHASE02-FINDINGS.md     # the recompile, and five silent defects
+│   └── PHASE03-FINDINGS.md     # the runtime harness, and where it stops
 ├── tools/
 │   ├── identify_rom.py         # verify a dump is the targeted revision
 │   ├── survey_rom.py           # reproduce the phase 00 measurements

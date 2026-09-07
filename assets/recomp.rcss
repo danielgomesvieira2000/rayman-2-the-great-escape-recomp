@@ -1,0 +1,29 @@
+/*
+ * The port's stylesheet.
+ *
+ * recompui loads this by name from <executable>/assets/recomp.rcss during
+ * renderer bring-up (ui_state.cpp: init_styling). It is not optional: if the
+ * file is missing, the frontend throws while building its menus, and because
+ * that happens on the renderer thread the exception crosses a noexcept boundary
+ * and the process fail-fasts with exit code 0xC0000409 and no message at all.
+ *
+ * It is deliberately almost empty. recompui carries its theme in code as a
+ * palette of named colours, and its elements style themselves from that. A port
+ * that writes its own colours here does not restyle those elements, it competes
+ * with them. So this file supplies the one thing the library cannot know --
+ * which font to use -- and otherwise stays out of the way. Restyling belongs in
+ * C++, by setting theme colours, not in rules added here.
+ *
+ * The family name is the one declared inside the .ttf, not its filename:
+ * LatoLatin-Regular.ttf calls itself "LatoLatin". It must match what
+ * src/main.cpp passes to register_primary_font. Getting it wrong fails quietly
+ * and confusingly -- every element lays out and draws in the right place, with
+ * no text in any of them.
+ */
+
+body {
+    font-family: LatoLatin;
+    font-weight: normal;
+    font-style: normal;
+    font-size: 20dp;
+}

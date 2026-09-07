@@ -123,6 +123,19 @@ callback through ultramodern. Controller Pak saves — start from the
 ROM ingest on first run, into a per-user data directory.
 
 **Gate:** the executable reaches `recomp_entrypoint` and runs the first thread.
+*Not met.* The port builds and links, RT64 brings up Direct3D 12 and enumerates
+the GPU, and the process then fail-fasts on the renderer thread before the game
+thread starts. See [PHASE03-FINDINGS.md](PHASE03-FINDINGS.md).
+
+**Amendment.** This phase said "Register RT64" and left RecompFrontend to phase
+06. That ordering is wrong: `create_render_context` is mandatory, has no
+default, and the only implementation in the tree is the frontend's, because
+RecompFrontend owns the RT64 application its overlay menus hook into. The
+frontend is therefore a phase 03 *dependency*, and every failure so far has been
+in its bring-up rather than in the game path. The alternative — writing a
+minimal RT64 context of our own — is more code but separates "does the
+recompiled game run" from "does the menu system initialise", which the gate
+implies should be separable and currently are not.
 
 ### 04 — Boot bring-up
 
