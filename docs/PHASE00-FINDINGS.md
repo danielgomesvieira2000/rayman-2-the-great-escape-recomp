@@ -67,6 +67,15 @@ project should start from that branch rather than re-implement `osPfs*`.
 
 ## 3. The code is one flat image — no module system
 
+> **Superseded by [PHASE01-FINDINGS.md](PHASE01-FINDINGS.md).** The
+> no-overlay-system conclusion below holds, and it was the load-bearing one.
+> The "one flat image" claim does not: the game has **three** code segments,
+> copied to three fixed addresses during boot (`0x80000400`, `0x80025C50`,
+> `0x800F64A0`). Only the first maps contiguously from the header's entry
+> point, which is why the contiguity assumption below looked plausible while
+> being wrong. The section is left as written; phase 01 records the correction
+> and how it was found.
+
 A 4 KB-block scan classifying blocks as code (>90% decodable MIPS III, ≥4 call
 or return instructions) finds the game's code in one contiguous span:
 

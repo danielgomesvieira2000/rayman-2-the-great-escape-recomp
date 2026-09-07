@@ -18,9 +18,11 @@ the cartridge is unusually friendly and the surrounding ecosystem is unusually
 bare.
 
 **Friendly:** the game uses a stock SDK microcode (`F3DEX.NoN 1.23`) that RT64
-already has a table entry for. Its code is one flat 768 KB KSEG0 image with no
-module or overlay system — the hardest single part of the Beetle Adventure
-Racing port simply does not exist here. It saves to a Controller Pak, for which
+already has a table entry for. Its 831 KB of code sits in three segments copied
+to fixed addresses at boot, with no module or overlay system and no relocation
+— the hardest single part of the Beetle Adventure Racing port simply does not
+exist here. (Phase 00 read this as one flat image; phase 01 corrected the
+segment count while confirming the no-overlay claim.) It saves to a Controller Pak, for which
 working emulation already exists in a sibling port. Its asserts kept `__FILE__`,
 so the binary tells you which source file most functions came from.
 
@@ -28,9 +30,9 @@ so the binary tells you which source file most functions came from.
 symbol map, no disassembly, no prior recompilation attempt. Both sibling ports
 started from a donor project; this one starts from a 32 MB binary and a header.
 
-So the risk here is not architectural. It is **volume**: at least 2,481
-functions have to be given names, addresses and — the part that actually bites —
-correct boundaries, with nothing to check against but the binary itself.
+So the risk here is not architectural. It is **volume**: the 4,444 functions
+phase 01 recovered have to be given names and — the part that actually bites —
+verified boundaries, with nothing to check against but the binary itself.
 
 ## The decision this project is built on
 
@@ -52,11 +54,11 @@ already proven on a game whose donor symbols were for the wrong revision.
 
 Sources of symbols, in descending order of trust:
 
-1. **Splat's own analysis** of the flat image — function boundaries recovered
-   from control flow, which is where the majority will come from.
+1. **Splat's own analysis** of the three code segments — function boundaries
+   recovered from control flow. This delivered 4,444 functions in phase 01,
+   which is where the majority came from.
 2. **A JAL-target scan** for call targets splat does not classify as functions.
-   The floor is 2,481; the tooling for this pass already exists in
-   `tools/survey_rom.py` and in the sibling port's `jal_scan.py`.
+   The phase 00 floor was 2,481; `tools/survey_rom.py` performs this pass.
 3. **Byte-matching libultra against a known SDK build**, so those functions can
    be renamed and handed to the runtime through `reimplemented_funcs` rather
    than recompiled at all. On a 1999 title this should account for a meaningful
@@ -82,7 +84,7 @@ identification and survey tooling, and the findings above.
 **Gate:** the tree configures and builds; `tools/identify_rom.py` accepts a
 correct dump and rejects everything else. *Met.*
 
-### 01 — Split the ROM
+### 01 — Split the ROM ✅
 
 The long, unglamorous phase, and the one that decides whether this project is
 viable. Stand up splat against the flat image. Recover function boundaries; run
@@ -92,7 +94,12 @@ DMA into RDRAM for anything that lands in an executable range.
 
 **Gate:** an assembled ELF whose `.text` is byte-identical to the ROM's code.
 Byte-identity is the whole point: it is the only check that proves the symbol
-table describes the binary rather than a plausible fiction.
+table describes the binary rather than a plausible fiction. *Met:* 850,464
+bytes across three sections, 4,444 functions recovered. The audit killed phase
+00's "one flat image" reading — there are three fixed-address segments — while
+confirming the claim that mattered: no overlay system. Two naming sub-tasks
+(libultra byte-matching, `__FILE__` partitioning) are carried into later phases;
+see [PHASE01-FINDINGS.md](PHASE01-FINDINGS.md).
 
 ### 02 — First recompile
 

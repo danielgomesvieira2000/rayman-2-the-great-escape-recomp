@@ -1,0 +1,2 @@
+// Symbols recovered in phase 01. Generated entries are appended by splat;
+// hand-verified names go here.

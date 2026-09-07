@@ -4,10 +4,12 @@ A **native PC port of _Rayman 2: The Great Escape_ (N64, USA)**, built by
 **static recompilation** with the [N64Recomp][N64Recomp] toolchain — the same
 approach behind [Zelda 64: Recompiled](https://github.com/Zelda64Recomp/Zelda64Recomp).
 
-> **Status: phase 00 — groundwork.** The cartridge has been surveyed, the build
-> plan is written, and the repository skeleton and ROM tooling are in place.
-> **The game does not build or run yet.** Follow the plan in
-> **[docs/PLAN.md](docs/PLAN.md)**; the measurements it rests on are in
+> **Status: phase 01 complete — the ROM splits.** An assembly-only ELF now
+> assembles and links, with all three code segments **byte-identical** to the
+> cartridge (850,464 bytes) and **4,444 functions** recovered. **The game does
+> not build or run yet** — that begins at phase 02. Follow
+> **[docs/PLAN.md](docs/PLAN.md)**; findings are in
+> **[docs/PHASE01-FINDINGS.md](docs/PHASE01-FINDINGS.md)** and
 > **[docs/PHASE00-FINDINGS.md](docs/PHASE00-FINDINGS.md)**.
 
 > **No game data is included.** You must supply your own legally-dumped USA ROM
@@ -36,9 +38,9 @@ What the cartridge gives back, measured rather than assumed:
 | Aspect | Finding | Why it matters |
 |---|---|---|
 | **Microcode** | Stock **`F3DEX.NoN 1.23`** — one identifier string in the whole ROM | RT64 already registers this exact GBI, on its F3DEX 1.x path. Not a vendor-custom ucode. |
-| **Code layout** | One flat **~768 KB** KSEG0 image, ROM `0x1000`–`0x0D0000`, loaded at `0x80000400` | **No overlay/module system.** The hardest part of the sibling Beetle port does not exist here. |
+| **Code layout** | **Three** fixed segments totalling **831 KB**, at `0x80000400`, `0x80025C50` and `0x800F64A0` | **No overlay/module system** — all copied at boot, never relocated. The hardest part of the sibling Beetle port does not exist here. |
 | **Saves** | **Controller Pak** only (58 references); no EEPROM/SRAM/Flash | Emulation already exists on the `controller-pak` branch of the runtime fork a sibling port uses. |
-| **Functions** | **≥ 2,481** distinct call targets; 9,985 `jal`, 3,301 `jr $ra` | A floor, not an estimate — indirect targets are not counted yet. This is the project's real cost. |
+| **Functions** | **4,444** recovered by splat (phase 00's `jal` floor was 2,481) | The gap is indirect targets a call scan cannot see. This is the project's real cost. |
 | **Symbols** | None public. Asserts kept `__FILE__` (`Actions/Brain.c`, `Culling.c`, …) | No names, but the binary partitions itself into named source modules for free. |
 | **Memory** | 4 MB; Expansion Pak optional (hi-res mode) | Flat KSEG0, no TLB-mapped code. |
 
@@ -53,6 +55,7 @@ python tools/survey_rom.py   path/to/rom.z64   # reproduce the survey
 
 ```
 your ROM ─► splat (asm-only) ─► symbol-rich ELF ─► N64Recomp ─► RecompiledFuncs/*.c ─┐
+            [phase 01 done]     [phase 01 done]                                      │
                                                    (recomp/rayman2.us.toml)          │
                                                                                      ├─► CMake ─► exe
 patches/*.c ─► clang -target mips ─► patches.elf ─► N64Recomp ─► RecompiledPatches/ ─┤
@@ -70,11 +73,18 @@ chosen over feeding N64Recomp a ROM plus a symbols TOML.
 rayman-2-the-great-escape-recomp/
 ├── docs/
 │   ├── PLAN.md                 # the phased build plan and its gates
-│   └── PHASE00-FINDINGS.md     # what the cartridge says, and how it was measured
+│   ├── PHASE00-FINDINGS.md     # what the cartridge says, and how it was measured
+│   └── PHASE01-FINDINGS.md     # the segment map, and how the ROM was split
 ├── tools/
 │   ├── identify_rom.py         # verify a dump is the targeted revision
-│   └── survey_rom.py           # reproduce the phase 00 measurements
-├── recomp/                     # N64Recomp configs + splat config (phase 01–02)
+│   ├── survey_rom.py           # reproduce the phase 00 measurements
+│   └── gen_missing_syms.py     # define references splat left unlabelled
+├── scripts/
+│   ├── setup-splat.sh          # pinned splat toolchain (WSL / Linux)
+│   ├── split-rom.sh            # splat: ROM -> asm/ + linker script
+│   ├── build-elf.sh            # assemble + link -> elf/rayman2.us.elf
+│   └── verify-elf.sh           # the phase 01 gate: byte-identity vs the ROM
+├── recomp/                     # splat config, linker script, N64Recomp configs
 ├── src/  include/              # the native host: RT64, input, audio, saves, UI glue
 ├── patches/                    # C compiled to MIPS that overrides/hooks game functions
 ├── assets/                     # bundled app assets (no game data, ever)
@@ -87,11 +97,20 @@ rayman-2-the-great-escape-recomp/
 
 ## Building
 
-Nothing to build yet beyond the tooling — see **[BUILDING.md](BUILDING.md)** for
-prerequisites and the pipeline as it comes online.
+See **[BUILDING.md](BUILDING.md)** for prerequisites. Through phase 01 the
+pipeline splits the ROM and produces the symbol-rich ELF; there is no playable
+executable yet.
 
 ```bash
 git clone --recurse-submodules https://github.com/danielgomesvieira2000/rayman-2-the-great-escape-recomp
+cd rayman-2-the-great-escape-recomp
+cp /path/to/your/rom.z64 .            # your own dump; never committed
+python tools/identify_rom.py rom.z64  # confirm the revision
+
+scripts/setup-splat.sh                # once (WSL or Linux)
+scripts/split-rom.sh                  # -> asm/, recomp/rayman2.us.ld
+scripts/build-elf.sh                  # -> elf/rayman2.us.elf
+scripts/verify-elf.sh                 # byte-identity against your ROM
 ```
 
 ## Sibling ports

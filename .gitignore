@@ -69,3 +69,11 @@ desktop.ini
 
 # Release staging
 /dist/
+
+# splat + link artifacts under recomp/ (regenerated from the user's own ROM by
+# scripts/split-rom.sh and scripts/build-elf.sh). The hand-written splat config
+# and the curated symbol_addrs.txt are committed; these are not.
+/recomp/rayman2.us.ld
+/recomp/undefined_funcs_auto.txt
+/recomp/undefined_syms_auto.txt
+/recomp/undefined_syms_extra.txt

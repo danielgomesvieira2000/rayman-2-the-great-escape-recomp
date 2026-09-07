@@ -1,0 +1,86 @@
+# splat configuration for Rayman 2: The Great Escape (USA, NUS-NY2E rev 0).
+#
+# Written from scratch: there is no Rayman 2 N64 decompilation to borrow a
+# config from. The three code segments and their load addresses below were
+# recovered from the binary itself and then confirmed against the game's own
+# loader; see docs/PHASE01-FINDINGS.md for the derivation.
+#
+#   ROM 0x001000-0x01DCC0  ->  vram 0x80000400   boot   (IPL3 loads this)
+#   ROM 0x01DCC0-0x0C5BF0  ->  vram 0x80025C50   main   (loaded by 0x80000880)
+#   ROM 0x0C5BF0-0x0D0A20  ->  vram 0x800F64A0   aux    (loaded by 0x80000B20)
+#
+# The three are loaded at fixed addresses during boot and are never relocated:
+# there is no overlay system. Everything past 0x0D0A20 is streamed asset data.
+
+name: Rayman 2 - The Great Escape (USA)
+sha1: 50558356b059ad3fbaf5fe95380512b9dceaaf52
+
+options:
+  basename: rayman2
+  target_path: rom.z64
+  base_path: ..
+  platform: n64
+  compiler: GCC
+
+  asm_path: asm
+  data_path: asm/data
+  src_path: src
+  build_path: build
+
+  # Assembly-only: we want symbols, addresses and sizes -- not recovered C.
+  create_c_files: False
+  create_asm_dependencies: False
+  migrate_rodata_to_functions: False
+  disassemble_all: True
+
+  ld_script_path: recomp/rayman2.us.ld
+  symbol_addrs_path: recomp/symbol_addrs.txt
+  undefined_funcs_auto_path: recomp/undefined_funcs_auto.txt
+  undefined_syms_auto_path: recomp/undefined_syms_auto.txt
+
+  find_file_boundaries: True
+  use_legacy_include_asm: False
+  asm_inc_header: ""
+
+segments:
+  - name: header
+    type: header
+    start: 0x0
+
+  - name: ipl3
+    type: bin
+    start: 0x40
+
+  # Loaded by IPL3 to the cartridge header's entry point.
+  - name: boot
+    type: code
+    start: 0x1000
+    vram: 0x80000400
+    subsegments:
+      - [0x1000, asm, boot]
+
+  # The bulk of the game. Copied by the routine at vram 0x80000880, which calls
+  # 0x800026D8 with (romStart=0x01DCC0, romEnd=0x0C5BF0, dest=0x80025C50).
+  - name: main
+    type: code
+    start: 0x1DCC0
+    vram: 0x80025C50
+    subsegments:
+      - [0x1DCC0, asm, main]
+
+  # Copied by the routine at vram 0x80000B20, which calls 0x800026D8 with
+  # (romStart=0x0C5BF0, romEnd=0x0D0A20, dest=0x800F64A0). Loaded unconditionally
+  # at boot alongside `main`, so it is a third fixed segment, not an overlay.
+  - name: aux
+    type: code
+    start: 0xC5BF0
+    vram: 0x800F64A0
+    subsegments:
+      - [0xC5BF0, asm, aux]
+
+  # Streamed asset data: levels, textures, audio. Never executed.
+  - name: assets
+    type: bin
+    start: 0xD0A20
+
+  - [0x2000000]
