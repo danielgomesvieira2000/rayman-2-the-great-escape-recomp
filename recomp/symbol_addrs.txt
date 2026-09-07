@@ -1,2 +1,91 @@
-// Symbols recovered in phase 01. Generated entries are appended by splat;
-// hand-verified names go here.
+// Symbols recovered in phase 01+, and hand-verified names.
+//
+// splat reads this file and uses these names instead of its generated
+// func_<addr> / D_<addr> ones. That matters beyond readability: N64Recomp
+// carries a list of known libultra functions and marks any it recognises by
+// name as `reimplemented`, so the recompiler skips it and the runtime's native
+// version (librecomp / ultramodern) is used instead. That is the only correct
+// way to handle routines that touch privileged CPU state, which cannot be
+// recompiled at all.
+//
+// ONLY put a name here when the function's body proves it. A wrong name is
+// worse than no name: it silently redirects calls to a runtime function with
+// different semantics, and nothing will flag it. Where a body did not prove a
+// specific libultra identity, the function is left as func_<addr> and stubbed
+// in rayman2.us.toml instead of being given a guessed name.
+
+// ---------------------------------------------------------------------------
+// Cache maintenance. Identified from the MIPS cache-op encodings, where the low
+// two bits select the cache (0 = I, 1 = D) and bits 4:2 the operation, together
+// with the size threshold each routine compares against: 0x4000 is the VR4300's
+// 16 KB instruction cache, 0x2000 its 8 KB data cache.
+// ---------------------------------------------------------------------------
+
+// Threshold 0x4000; ops 0x00 Index_Invalidate_I and 0x10 Hit_Invalidate_I.
+// The only icache routine that takes a range.
+osInvalICache = 0x8000CD40; // type:func
+
+// Threshold 0x2000; main loop 0x11 Hit_Invalidate_D, with 0x15
+// Hit_Writeback_Invalidate_D on the unaligned head and tail lines so that data
+// sharing those lines is not discarded. That head/tail treatment is precisely
+// how osInvalDCache is written.
+osInvalDCache = 0x80003C30; // type:func
+
+// Threshold 0x2000; op 0x19 Hit_Writeback_D -- writeback without invalidate.
+osWritebackDCache = 0x8000CED0; // type:func
+
+// Walks the whole 8 KB data cache from 0x80000000 with 0x01
+// Index_Writeback_Invalidate_D and takes no range argument.
+osWritebackDCacheAll = 0x80003D90; // type:func
+
+// ---------------------------------------------------------------------------
+// Interrupt and status-register access, identified from cop0 register numbers.
+// Register 12 is Status, register 9 is Count.
+// ---------------------------------------------------------------------------
+
+// Clears Status bit 0 (IE) and returns the previous value of that bit.
+__osDisableInt = 0x8000CDC0; // type:func
+
+// ORs its argument back into Status.
+__osRestoreInt = 0x8000CDE0; // type:func
+
+// Body is `mfc0 $v0, $9` then `jr $ra`. Cop0 register 9 is Count, the cycle
+// counter; a function that only reads it and returns is osGetCount.
+osGetCount = 0x8000CD20; // type:func
+
+// `mfc0 $v0, $12` then `jr $ra` -- reads Status and returns it.
+// NOT in N64Recomp's reimplemented set, so it is stubbed in the config.
+__osGetSR = 0x8000CD30; // type:func
+
+// `mtc0 $a0, $12` then `jr $ra` -- writes Status.
+// NOT in N64Recomp's reimplemented set, so it is stubbed in the config.
+__osSetSR = 0x8000CEC0; // type:func
+
+// `cfc1 $v0, $31` / `ctc1 $a0, $31` / `jr $ra`: reads the FPU control/status
+// register into the return value, then writes the argument into it.
+// Return-old-and-set is osSetFpcCsr's contract.
+osSetFpcCsr = 0x8000CEB0; // type:func
+
+// ---------------------------------------------------------------------------
+// Corrected function boundaries.
+//
+// splat recovers boundaries from control flow, which misreads large handwritten
+// assembly routines whose branches do not look like ordinary intra-function
+// flow. Where it splits one function into two, the second half branches
+// backwards into the first, and N64Recomp rejects it: "branching outside of the
+// function". The fix is to declare the true extent so splat stops splitting.
+// ---------------------------------------------------------------------------
+
+// splat ended this at 0x8000C944 (size 0x574) and started a new function there,
+// but that "function" branches back to 0x8000C8FC and 0x8000C914, both inside
+// this one. The two halves are one routine: 0x574 + 0xF0 = 0x664. It saves and
+// restores FPU control state (cfc1/ctc1 $31) and touches cop0, which is the
+// shape of a libultra exception handler -- but the body does not prove which
+// one, so it keeps its generated name.
+func_8000C3D0 = 0x8000C3D0; // type:func size:0x664
+
+// `mtc0 $a0, $11` then `jr $ra`. Cop0 register 11 is Compare, the timer-match
+// register; a function that only writes it is the set-Compare routine. This
+// name is in N64Recomp's built-in ignored set, so naming it is what makes the
+// recompiler drop it.
+__osSetCompare = 0x8000CEA0; // type:func

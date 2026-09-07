@@ -76,4 +76,5 @@ desktop.ini
 /recomp/rayman2.us.ld
 /recomp/undefined_funcs_auto.txt
 /recomp/undefined_syms_auto.txt
-/recomp/undefined_syms_extra.txt
+/recomp/ignored_syms.txt
+/recomp/auto_funcs.txt

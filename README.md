@@ -4,13 +4,15 @@ A **native PC port of _Rayman 2: The Great Escape_ (N64, USA)**, built by
 **static recompilation** with the [N64Recomp][N64Recomp] toolchain — the same
 approach behind [Zelda 64: Recompiled](https://github.com/Zelda64Recomp/Zelda64Recomp).
 
-> **Status: phase 01 complete — the ROM splits.** An assembly-only ELF now
-> assembles and links, with all three code segments **byte-identical** to the
-> cartridge (850,464 bytes) and **4,444 functions** recovered. **The game does
-> not build or run yet** — that begins at phase 02. Follow
-> **[docs/PLAN.md](docs/PLAN.md)**; findings are in
-> **[docs/PHASE01-FINDINGS.md](docs/PHASE01-FINDINGS.md)** and
-> **[docs/PHASE00-FINDINGS.md](docs/PHASE00-FINDINGS.md)**.
+> **Status: phase 02 complete — the game recompiles.** The ROM splits into an
+> assembly-only ELF whose three code segments are **byte-identical** to the
+> cartridge (850,464 bytes), and N64Recomp translates all **4,580** functions
+> into C that compiles into a **5.2 MB static library** exporting 3,267
+> functions. **There is still no runnable executable** — that is phase 03/04,
+> where the runtime is wired up. Follow **[docs/PLAN.md](docs/PLAN.md)**;
+> findings are in **[docs/PHASE02-FINDINGS.md](docs/PHASE02-FINDINGS.md)**,
+> **[PHASE01](docs/PHASE01-FINDINGS.md)** and
+> **[PHASE00](docs/PHASE00-FINDINGS.md)**.
 
 > **No game data is included.** You must supply your own legally-dumped USA ROM
 > (SHA-1 `50558356b059ad3fbaf5fe95380512b9dceaaf52`). No ROM, asset, or
@@ -74,16 +76,23 @@ rayman-2-the-great-escape-recomp/
 ├── docs/
 │   ├── PLAN.md                 # the phased build plan and its gates
 │   ├── PHASE00-FINDINGS.md     # what the cartridge says, and how it was measured
-│   └── PHASE01-FINDINGS.md     # the segment map, and how the ROM was split
+│   ├── PHASE01-FINDINGS.md     # the segment map, and how the ROM was split
+│   └── PHASE02-FINDINGS.md     # the recompile, and five silent defects
 ├── tools/
 │   ├── identify_rom.py         # verify a dump is the targeted revision
 │   ├── survey_rom.py           # reproduce the phase 00 measurements
-│   └── gen_missing_syms.py     # define references splat left unlabelled
+│   ├── gen_link_syms.py        # symbol assignments that don't shadow real ones
+│   ├── gen_missing_funcs.py    # declare call targets splat missed
+│   └── gen_ignored_syms.py     # tell N64Recomp which .text symbols are data
 ├── scripts/
 │   ├── setup-splat.sh          # pinned splat toolchain (WSL / Linux)
 │   ├── split-rom.sh            # splat: ROM -> asm/ + linker script
 │   ├── build-elf.sh            # assemble + link -> elf/rayman2.us.elf
-│   └── verify-elf.sh           # the phase 01 gate: byte-identity vs the ROM
+│   ├── verify-elf.sh           # the phase 01 gate: byte-identity vs the ROM
+│   ├── build-recompiler.sh     # build N64Recomp + RSPRecomp from lib/
+│   ├── refine-syms.sh          # recover call targets, until it converges
+│   ├── recompile.sh            # N64Recomp -> RecompiledFuncs/*.c
+│   └── build-recompiled-lib.sh # the phase 02 gate: compile + archive
 ├── recomp/                     # splat config, linker script, N64Recomp configs
 ├── src/  include/              # the native host: RT64, input, audio, saves, UI glue
 ├── patches/                    # C compiled to MIPS that overrides/hooks game functions
@@ -111,6 +120,10 @@ scripts/setup-splat.sh                # once (WSL or Linux)
 scripts/split-rom.sh                  # -> asm/, recomp/rayman2.us.ld
 scripts/build-elf.sh                  # -> elf/rayman2.us.elf
 scripts/verify-elf.sh                 # byte-identity against your ROM
+
+scripts/build-recompiler.sh           # build the recompiler itself
+scripts/recompile.sh                  # -> RecompiledFuncs/*.c
+scripts/build-recompiled-lib.sh       # compile it into a static library
 ```
 
 ## Sibling ports

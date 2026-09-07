@@ -101,7 +101,7 @@ confirming the claim that mattered: no overlay system. Two naming sub-tasks
 (libultra byte-matching, `__FILE__` partitioning) are carried into later phases;
 see [PHASE01-FINDINGS.md](PHASE01-FINDINGS.md).
 
-### 02 — First recompile
+### 02 — First recompile ✅
 
 Write `recomp/rayman2.us.toml`, run N64Recomp, compile the output. Script the
 fixes for writes to `$zero` and for unresolved jump tables. Keep
@@ -109,6 +109,11 @@ fixes for writes to `$zero` and for unresolved jump tables. Keep
 links against.
 
 **Gate:** every generated `funcs_*.c` compiles and links into a static library.
+*Met:* 4,580 functions translated with no errors; 66 objects archived into a
+5.2 MB library exporting 3,267 functions. Every defect found in this phase was
+silent -- including one that emitted 1 function out of 4,465 and exited
+successfully -- so each pipeline stage now reports counts. See
+[PHASE02-FINDINGS.md](PHASE02-FINDINGS.md).
 
 ### 03 — Runtime harness
 
