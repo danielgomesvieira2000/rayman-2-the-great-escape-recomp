@@ -249,3 +249,40 @@ osRecvMesg = 0x800040F0; // type:func
 //               has no use for validCount in the index, and does not load it.
 osSendMesg = 0x8000D2C0; // type:func
 osJamMesg  = 0x8000D130; // type:func
+
+// ---------------------------------------------------------------------------
+// Video Interface.
+// ---------------------------------------------------------------------------
+
+// osCreateViManager(OSPri pri). Called from the game's main thread with
+// a0 = 254, which is OS_PRIORITY_VIMGR. The body is the textbook sequence:
+// a once-only guard on the manager struct at D_8001A380, timer-services init,
+// osCreateMesgQueue for the VI event queue with a count of 5, the event message
+// constants 0xD and 0xE, and finally creating and starting the VI thread.
+//
+// This is the public entry point, and taking it is the whole point. The
+// function it calls to set up the two OSViContexts -- func_80011480, which
+// bzeros 0x60 bytes, reads osTvType from 0x80000300 to pick NTSC/PAL/MPAL and
+// sets the retrace count to 1, i.e. __osViInit -- is in the recompiler's
+// *ignored* set, so naming THAT would oblige this port to emulate the VI
+// registers itself. Naming osCreateViManager instead hands the entire manager
+// to ultramodern, and __osViInit is simply never called.
+osCreateViManager = 0x80007D10; // type:func
+
+// ---------------------------------------------------------------------------
+// Peripheral Interface (cartridge DMA).
+// ---------------------------------------------------------------------------
+
+// osCreatePiManager(pri, cmdQ, cmdBuf, cmdMsgCnt). Four arguments matching that
+// signature, a once-only guard on the manager struct at D_8001B2C0, and it
+// creates the caller's command queue before installing the manager's own
+// routines: func_8000B6D0 as the thread entry (__osDevMgrMain -- confirmed by
+// being passed as a2 to osCreateThread at 0x8000B264, and by appearing in a
+// crash stack called directly from run_thread_function) and func_80013430 as
+// the raw DMA routine (__osPiRawStartDma -- it writes PI_DRAM_ADDR,
+// PI_CART_ADDR and PI_WR_LEN).
+//
+// Both of those are in the recompiler's *ignored* set, so naming either would
+// oblige this port to drive the PI registers itself. Naming the public creator
+// hands the whole manager -- thread, queue and DMA -- to librecomp instead.
+osCreatePiManager = 0x8000B190; // type:func

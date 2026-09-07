@@ -4,10 +4,12 @@ A **native PC port of _Rayman 2: The Great Escape_ (N64, USA)**, built by
 **static recompilation** with the [N64Recomp][N64Recomp] toolchain — the same
 approach behind [Zelda 64: Recompiled](https://github.com/Zelda64Recomp/Zelda64Recomp).
 
-> **Status: phase 04 in progress — the game runs, but does not draw.** The port
-> boots into recompiled code, survives libultra initialisation and runs
-> indefinitely with a window open — but the screen stays black, so the phase 04
-> gate (the logo and attract sequence rendering) is **not** met. Details in
+> **Status: phase 04 in progress — the game runs clean, and stops on its own
+> assertion.** Every libultra subsystem the boot path touches has been handed to
+> the runtime, and there are no access violations left. The game now runs to a
+> `break` at vram `0x8008F86C` — its own range-check assert — so the failure is
+> game-level rather than a port fault. Nothing renders yet, so the phase 04 gate
+> is **not** met. Details in
 > **[docs/PHASE04-FINDINGS.md](docs/PHASE04-FINDINGS.md)**.
 >
 > **Phase 03 complete** — RT64 comes up and `recomp_entrypoint` is reached on

@@ -173,34 +173,55 @@ on the game thread) identifies the class instantly.
 
 ## Where it stops now
 
-The threading and message-queue layer is now the runtime's, and boot has moved
-past it: the current fault is at offset `0x24400010` from RDRAM, which is
-`0xA4400010` -- **VI_CURRENT**. Back to a hardware register, and out of the
-null-pointer class entirely.
+**No access violations at all.** Every libultra layer the boot path touches is
+now the runtime's, and the game runs cleanly through all of it. It ends instead
+with librecomp reporting:
 
-That is the frontier: the Video Interface. `func_80011480` reads VI_CURRENT and
-`func_80008300` writes the whole VI register block, so the next names to prove
-are around `osViGetCurrentLine`, `osViSetMode`/`osViSwapBuffer` and the VI
-manager. The public/private rule from earlier in this phase applies again --
-`osViSwapBuffer` is reimplemented while `__osViSwapContext` is not, so the win
-is naming the public entry point and letting the manager beneath it go away.
+```
+Initializing recomp heap at offset 0x01000000 with size 0x1F000000
+[rayman2] entering recomp_entrypoint -- the game thread is running
+[rayman2] frames 123 (+60/s)  display lists 0 (+0/s)
+Encountered break at original vram 0x8008F86C
+```
 
-Still no display lists, so nothing renders yet.
+That is a MIPS `break`, not a crash -- `func_8008F86C` is a three-instruction
+stub whose whole job is to trap, i.e. the game's assert/panic routine. The call
+site is a plain range check:
 
-So execution is proceeding and **nothing is reaching the renderer**. The next
-question is which of these it is, and they are distinguishable:
+```
+lw    $v0, 0xC($s0)      ; a field of some structure
+sltiu $v0, $v0, 0x100    ; must be under 0x100
+bnez  $v0, .L80088DAC    ; in range -- carry on
+jal   func_8008F86C      ; out of range -- assert
+```
 
-1. The game is stuck in an early wait loop — blocked on a message queue, a VI
-   retrace or a DMA completion that never arrives — and has not got as far as
-   drawing. The steady but modest CPU use is consistent with a spin.
-2. The game is running its main loop and submitting graphics tasks, but they are
-   not reaching `send_dl` in `src/rt64_context.cpp`.
-3. Display lists arrive and RT64 draws nothing recognisable.
+So the game got far enough to check its own invariant and found it violated.
+This is a **game-level** failure now, not a runtime one, and that is a different
+and better kind of problem: the port is no longer the thing that is broken.
 
-**The cheapest way to tell them apart is a counter.** `src/rt64_context.cpp`
-should log the first call to `send_dl` and `send_dummy_workload`, and how many
-of each arrive per second. That single measurement splits (1) from (2) from (3),
-and the phase 03 lesson applies: build the instrument before forming the theory.
+Phase 00 noted the ROM keeps its `__FILE__` strings, and this is where that pays
+off -- the assert stub is reached from a specific source file, and finding which
+one narrows the search enormously. Whatever is at offset 0xC of that structure
+is either uninitialised or was filled from data that never arrived.
+
+## Subsystems handed to the runtime
+
+The whole of this phase, in one table. Each name was proven from the function's
+body, and each is in the recompiler's *reimplemented* set, so naming it moves
+the work to librecomp rather than obliging this port to emulate hardware:
+
+| Subsystem | Named | What it removed |
+|---|---|---|
+| Init | `osInitialize` | PIF RAM handshake, SI polling, exception-vector install |
+| Audio | `osAiSetFrequency` | AI_DACRATE / AI_BITRATE pokes |
+| Threads | `osCreateThread`, `osStartThread`, `osGetThreadPri`, `osSetThreadPri`, `osGetThreadId` | the game's run queue and `__osRunningThread` |
+| Messages | `osCreateMesgQueue`, `osRecvMesg`, `osSendMesg`, `osJamMesg` | blocking, yielding and the enqueue path |
+| Video | `osCreateViManager` | `__osViInit`, the VI thread, VI register writes |
+| Cartridge | `osCreatePiManager` | `__osDevMgrMain`, `__osPiRawStartDma`, PI register writes |
+
+The pattern held every time: **name the public entry point, and the private
+plumbing beneath it stops being reached.** Not one hardware register needed
+emulating in the end.
 
 ## Still outstanding
 
