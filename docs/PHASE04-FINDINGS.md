@@ -223,6 +223,63 @@ The pattern held every time: **name the public entry point, and the private
 plumbing beneath it stops being reached.** Not one hardware register needed
 emulating in the end.
 
+## The `__FILE__` partitioning, and what it was actually worth
+
+`tools/partition_by_file.py` finds the source paths the compiler embedded in the
+cartridge's asserts, resolves every address the code materialises (both splat's
+`%hi/%lo` symbolic form and the literal constants it writes out), and attributes
+each function to the file it was built from. `docs/MODULE-MAP.md` is the result.
+
+**Phase 00 oversold this, and the correction matters.** It predicted the assert
+anchors would "partition a large fraction" of the functions into modules. The
+measured yield is **36 functions across 28 source files** -- roughly one percent
+of the ~3,000 in the port. Asserts with `__FILE__` simply are not distributed
+the way that prediction assumed; most functions contain none.
+
+What it *is* worth is different, and in one respect better than expected.
+Twelve of the 28 files are **libultra's own sources**, and a libultra filename
+identifies a function outright:
+
+| Function | File | Therefore |
+|---|---|---|
+| `func_80008650` | `sirawread.c` | `__osSiRawReadIo` |
+| `func_800086E0` | `sirawwrite.c` | `__osSiRawWriteIo` |
+| `func_800115C0` | `sirawdma.c` | `__osSiRawStartDma` |
+| `func_8000B0F0` | `pirawread.c` | `__osPiRawReadIo` |
+| `func_80013520` | `epirawread.c` | `__osEPiRawReadIo` |
+| `func_80011380` | `sprawdma.c` | `__osSpRawStartDma` |
+
+The first three had already been identified from their instruction bodies
+earlier in this phase, and the compiler's own strings agree. That is genuine
+corroboration from an independent source, which is worth more than either
+method alone -- and it means the technique's real use here is confirming
+libultra identities rather than mapping the game.
+
+The game-side files it did find (`Actions/Brain.c`, `Actions/Dynam.c`,
+`Culling.c`, `Inters.c`, `HieMtStk.c`, `Specif/U_vpt.c` and the rest) give one
+or two functions each. Useful as anchors, not as a map.
+
+## It did not answer the question that prompted it
+
+The point of doing this now was to find which source file the failing assertion
+lives in. It cannot, and the reason is worth recording so nobody retries it:
+
+```
+func_8008F86C:
+    break  255
+    jr     $ra
+```
+
+The assert routine is a bare trap. It takes no filename, no line number and no
+message -- so there is no `__FILE__` reference at the call site to attribute,
+and `func_80088B5C`, the function that trips it, references no source path at
+all. This is a different assert mechanism from the ones that do embed paths.
+
+Narrowing that failure needs a different approach: the field at offset `0xC` of
+the structure is required to be under `0x100`, so the question is what fills
+that structure, and that is a data-flow question to answer by tracing
+`func_80088B5C`'s caller rather than by looking for names.
+
 ## Still outstanding
 
 - **Nineteen functions in the boot segment poke hardware registers** (a scan for
