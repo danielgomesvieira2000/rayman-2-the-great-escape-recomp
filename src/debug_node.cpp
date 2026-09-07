@@ -97,3 +97,35 @@ extern "C" void rayman2_debug_site(uint8_t* rdram, uint32_t site) {
     ++seen;
     std::fprintf(stderr, "[rayman2] ASSERT fired at call site 0x%08X\n", site);
 }
+
+// Is the boot segment's bss actually zeroed?
+//
+// The flag at 0x800250D8 is READ in exactly one place and written nowhere in
+// any of the three segments. It lives in the boot segment's bss, which the
+// entry stub clears (0x8001D0C0 for 0x8B90 bytes), so it should read 0 and the
+// boot thread should spin on it. It reads 1, so something is wrong with that
+// assumption -- and the way to find out which is to look at the memory rather
+// than reason about it.
+//
+// If the surrounding words are zero, the clear ran and something set this one.
+// If they carry plausible ROM data, the clear did not cover this address and
+// what is being read is leftover from the 1 MB boot DMA.
+extern "C" void rayman2_debug_flag(uint8_t* rdram, uint32_t addr, uint32_t loaded) {
+    static int seen = 0;
+    if (seen >= 3) {
+        return;
+    }
+    ++seen;
+
+    const gpr base = (gpr)(int32_t)(addr & ~0xFu);
+    std::fprintf(stderr, "[rayman2] flag 0x%08X reads %u; memory around it:\n",
+                 addr, loaded);
+    for (int row = -2; row <= 2; ++row) {
+        const gpr a = base + (gpr)(int32_t)(row * 16);
+        std::fprintf(stderr,
+                     "[rayman2]   0x%08X: %08X %08X %08X %08X\n",
+                     (uint32_t)(addr & ~0xFu) + row * 16,
+                     (uint32_t)MEM_W(0x0, a), (uint32_t)MEM_W(0x4, a),
+                     (uint32_t)MEM_W(0x8, a), (uint32_t)MEM_W(0xC, a));
+    }
+}

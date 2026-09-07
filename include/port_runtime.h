@@ -59,6 +59,7 @@ void __osSetCompare_recomp(uint8_t* rdram, recomp_context* ctx);
 void rayman2_debug_node(uint8_t* rdram, uint32_t node_addr);
 void rayman2_debug_assert(uint8_t* rdram, uint32_t ra);
 void rayman2_debug_site(uint8_t* rdram, uint32_t site);
+void rayman2_debug_flag(uint8_t* rdram, uint32_t addr, uint32_t loaded);
 
 #ifdef __cplusplus
 }

@@ -228,3 +228,11 @@ text = "rayman2_debug_site(rdram, 0x800FFEBCu);"
 func = "func_800FFD98"
 before_vram = 0x80100040
 text = "rayman2_debug_site(rdram, 0x80100040u);"
+
+# Report the flag the boot thread waits on, and the memory around it.
+# Injected before the `bne` at 0x800006A4, where $v0 holds the value just
+# loaded from 0x800250D8 and $s0 holds the 1 it is compared against.
+[[patches.hook]]
+func = "func_800004C0"
+before_vram = 0x800006A4
+text = "rayman2_debug_flag(rdram, 0x800250D8u, (uint32_t)ctx->r2);"

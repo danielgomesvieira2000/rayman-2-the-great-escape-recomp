@@ -566,6 +566,93 @@ blocker", and the hook overturned the whole assert trace. The pattern is
 consistent enough to state as a rule: **in this codebase, a plausible path found
 by reading is not evidence that it is the path taken.** Ask the running program.
 
+## Root cause: osStartThread does not write OSThread.state
+
+Following the real assert site to its end found the reason the game does not
+boot, and it is not in the game.
+
+### What the boot thread is doing
+
+`func_800004C0` creates the game thread, starts it, and then:
+
+```
+addiu $s0, $zero, 0x1        ; s0 = 1
+.L8000069C:
+lhu   $v0, D_800250D8        ; a halfword in boot bss
+.L800006A4:
+bne   $v0, $s0, .L800006A4   ; spin while it is not 1
+jal   func_8008F86C          ; it IS 1 -> trap
+```
+
+`D_800250D8` is not a standalone flag. Dumping the memory around it at runtime
+shows a structure starting at `0x800250C8`:
+
+| Offset | Value | Field |
+|---|---|---|
+| `0x00` | `00000000` | `next` |
+| `0x04` | `00000008` | `priority` = 8 |
+| `0x08` | `8001D138` | `queue` |
+| `0x10` | `0001` | **`state`** |
+| `0x14` | `00000003` | `id` = 3 |
+
+That is an **`OSThread`**, and the layout matches the one established earlier
+from `osStartThread` and `osGetThreadPri`. So the boot thread is polling the
+child thread's `state`, waiting for it to read `OS_STATE_STOPPED` (1), and
+trapping when it does. On hardware that poll never succeeds: the thread is
+running, so the boot thread idles there forever, which is exactly what an idle
+thread should do. The trap is the "the game thread died" path.
+
+### Why it reads STOPPED
+
+From `ultramodern/src/threads.cpp`:
+
+```cpp
+extern "C" void osStartThread(RDRAM_ARG PTR(OSThread) t_) {
+    if (thread_self) {
+        ultramodern::schedule_running_thread(PASS_RDRAM t_);   // does not touch t->state
+        ultramodern::check_running_queue(PASS_RDRAM1);
+    }
+    else {
+        t->state = OSThreadState::QUEUED;                       // only this path writes it
+        resume_thread(t);
+    }
+}
+```
+
+Called from a game thread -- which is this case -- it schedules the thread and
+**never writes `state` back into RDRAM**. The field keeps whatever
+`osCreateThread` left, which is `STOPPED`. The runtime's own scheduling is
+correct and the thread really does run; it is only the game-visible copy of the
+state that is stale.
+
+So the boot thread's poll succeeds on its first read and the game traps. Nothing
+is wrong with the game, the recompilation, or the data.
+
+### The shape of this bug, which has now appeared three times
+
+This is the same failure as `__osRunningThread` reading null and as the game's
+own `osCreateThread` never scheduling anything: **the game reads libultra state
+that ultramodern owns and does not mirror**. The first two were fixed by naming
+functions so the runtime provides them. This one cannot be, because the function
+*is* already the runtime's -- it simply does not maintain a field the game
+inspects directly.
+
+That makes it the first problem in this port that has to be fixed in the runtime
+rather than in configuration.
+
+### Fixing it
+
+The repository already consumes a fork of N64ModernRuntime (the `controller-pak`
+branch), so there is somewhere to put this. The change is small: on the
+`thread_self` path, set the game-visible `state` to match what the scheduler has
+actually done, as the other path already does.
+
+Worth confirming before writing it: which of `QUEUED` / `RUNNING` the game
+expects to see between `osStartThread` and the thread being scheduled, since the
+poll only cares that it is not `STOPPED`. Anything other than 1 unblocks this
+particular case, but the field is observable to any game, so it should be right
+rather than merely non-1.
+
 ## Still outstanding
 
 - **Nineteen functions in the boot segment poke hardware registers** (a scan for
