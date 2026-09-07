@@ -261,28 +261,80 @@ completes. It is kept anyway, for two reasons: waiting on a real signal is
 correct where sleeping a guessed interval is not, and a failure that reproduces
 every time is worth more than one that hides nine times in ten.
 
-## Where phase 04 should start
+## Correction: the crash is not in the renderer, and not a null check
 
-Not with the boot path, and not with symbol boundaries. With a debugger on the
-renderer thread:
+The previous section predicted the fault was in `src/rt64_context.cpp` --
+`update_screen`, `send_dl` or `send_dummy_workload` dereferencing `app` with no
+guard, on the renderer thread. **That was wrong.** Those guards were a genuine
+defect and are now fixed, but adding them changed nothing: still 0 of 10.
 
-1. Attach and break on the access violation in a `-DRAYMAN2_ENABLE_FRONTEND=OFF`
-   build. It reproduces every time now, which is the whole point of the change
-   above.
-2. The prime suspects are in `src/rt64_context.cpp`, and they are mine, not
-   RT64's: `update_screen`, `send_dl` and `send_dummy_workload` all dereference
-   `app` and `app->state` with no null check, on a thread that can call them
-   before or after the game exists.
-3. `Failed to find function at 0x80000450` is real and still needs fixing, but
-   it is downstream of this and only observable once the renderer stops dying.
-   Note that declaring that boundary was tried and made things worse, so it is
-   not as simple as it looks -- see `recomp/symbol_addrs.txt`.
+`src/crash_report.cpp` was added to settle it. There is no debugger installed on
+this machine, and `0xC0000005` with no output is close to no information, so the
+port now installs an unhandled-exception filter that prints the faulting
+address, whether it was a read or a write, and a stack walk resolved to module
+and offset. Built once with `-DCMAKE_BUILD_TYPE=RelWithDebInfo`, those offsets
+resolve through the PDB with `llvm-symbolizer`:
 
-## Also fixed here
+```
+recomp::do_rom_read()        librecomp/src/pi.cpp:72
+init()                       librecomp/src/recomp.cpp:505
+wait_for_game_started()      librecomp/src/recomp.cpp:716
+recomp::start lambda         librecomp/src/recomp.cpp:980
+```
 
-- **SDL's audio subsystem was never initialised.** `create_gfx` brings up video
-  only, so the first `set_frequency` failed with "Audio subsystem is not
-  initialized". It is now initialised lazily on first use.
-- **The entrypoint is wrapped** (`rayman2_entrypoint`) so that crossing into
-  recompiled code is visible in the log rather than inferred. That wrapper is
-  what made the one successful run legible, and it is worth keeping.
+That is the **game thread**, not the renderer: librecomp emulating IPL3 by
+DMAing the first 1 MB of ROM into RDRAM, before the entrypoint is ever called.
+Which is also why `entering recomp_entrypoint` never printed -- the game never
+got that far.
+
+## A real bug found on the way: the ROM was never loaded
+
+The diagnostic that made this obvious:
+
+```
+pre-start: rom_valid=1 rom_loaded=0 rom_bytes=0
+```
+
+`check_all_stored_roms()` and `is_rom_valid()` establish only that a correct
+dump exists in the config directory. **They do not read it, and neither does
+`start_game()`** -- the port is expected to call `recomp::load_stored_rom()`,
+and `main()` never did.
+
+That is not a quiet no-op. `do_rom_read` computes its source as
+`rom.data() + physical_addr - rom_base`; with an empty span that is an offset
+from `nullptr`, and the 1 MB copy walks into unmapped memory. Fixed, and the
+port now reports `rom loaded: 33554432 bytes` before starting.
+
+## What is still wrong
+
+The ROM fix was necessary and not sufficient. With 32 MB correctly loaded, the
+same write still faults at the same place, and the numbers say it should not:
+
+- The faulting write is at `rdram + 0x403`. That is right: `MEM_B` maps KSEG0
+  `0x80000400` to offset `0x400`, byte-swapped to `0x403`. It is the fourth byte
+  of the copy, not a wild pointer.
+- librecomp allocates RDRAM as a 4 GB reservation and makes the first
+  `mem_size` -- **512 MB** (`librecomp/include/librecomp/addresses.hpp`) --
+  `PAGE_READWRITE`. Offset `0x403` is far inside that.
+- The allocation did not fail. Failure prints "Failed to allocate memory!"
+  through the port's own message box, and it never appears.
+
+So the ROM is loaded, the destination offset is correct, and the destination
+region is nominally writable -- and the write still faults. One of those three
+statements is false at run time, and finding out which is the next step. It
+wants a debugger stepping into `pi.cpp:72` to read the actual `rdram` value and
+query it with `VirtualQuery`, rather than more reasoning from the outside. The
+4 GB `MEM_COMMIT` reservation on a laptop is the first thing worth checking.
+
+## What phase 04 inherits
+
+- **A crash reporter that works.** Every fault from here on names a function and
+  a line instead of an exit code. This is the single most useful thing added in
+  this phase.
+- **A `RelWithDebInfo` build** (`build-dbg`) that produces a PDB, and
+  `llvm-symbolizer` from the LLVM install to resolve it.
+- **A deterministic failure.** It reproduces on every run, which it did not
+  before.
+- `Failed to find function at 0x80000450` is still real and still unfixed, but
+  it is downstream of this and only observable once the DMA succeeds. Declaring
+  that boundary was tried and made things worse -- see `recomp/symbol_addrs.txt`.

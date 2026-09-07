@@ -67,6 +67,9 @@ RspUcodeFunc* rayman2_get_rsp_microcode(const OSTask* task);
 // game-side addresses can be resolved back to recompiled functions.
 void rayman2_register_sections();
 
+// src/crash_report.cpp -- prints a located fault instead of exiting silently.
+void rayman2_install_crash_reporter();
+
 // src/rt64_context.cpp -- set true once the renderer has presented a frame.
 namespace rayman2 { std::atomic<bool>& vi_has_ticked(); }
 
@@ -354,6 +357,10 @@ int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::fprintf(stderr, "[rayman2] start\n");
 
+    // Installed before anything else: the fault being chased happens on a
+    // renderer thread and otherwise produces no output at all.
+    rayman2_install_crash_reporter();
+
     SDL_SetMainReady();
 
 #ifdef _WIN32
@@ -404,6 +411,27 @@ int main(int argc, char** argv) {
         if (!rayman2::vi_has_ticked().load(std::memory_order_acquire)) {
             std::fprintf(stderr, "[rayman2] renderer never presented a frame; starting anyway\n");
         }
+        // Load the cached ROM into memory before starting.
+        //
+        // This is NOT the same thing as validating it. check_all_stored_roms()
+        // and is_rom_valid() only establish that a correct dump exists in the
+        // config directory; they do not read it. Nothing else does either --
+        // start_game() does not, and the port is expected to.
+        //
+        // Skipping it is not a quiet no-op. librecomp's init() emulates IPL3
+        // with a fixed 1 MB DMA from ROM into RDRAM, and do_rom_read() computes
+        // its source as rom.data() + physical_addr - rom_base. With an empty
+        // span that is an offset from nullptr, and the copy walks into
+        // unmapped memory -- an access violation on the game thread, three
+        // frames deep in the runtime, with nothing pointing back at the real
+        // mistake up here.
+        if (!recomp::load_stored_rom(game_id)) {
+            message_box("Failed to load the stored ROM from the config directory.");
+            return;
+        }
+        std::fprintf(stderr, "[rayman2] rom loaded: %zu bytes\n",
+                     recomp::get_rom().size());
+
         recomp::start_game(game_id, "");
     }).detach();
 #else

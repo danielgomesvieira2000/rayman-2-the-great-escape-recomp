@@ -119,7 +119,7 @@ public:
     RT64Context(uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode);
     ~RT64Context() override = default;
 
-    bool valid() override { return app != nullptr; }
+    bool valid() override { return usable(); }
 
     bool update_config(const ultramodern::renderer::GraphicsConfig& old_config,
                        const ultramodern::renderer::GraphicsConfig& new_config) override;
@@ -132,7 +132,21 @@ public:
     float get_resolution_scale() const override;
 
 private:
+    // Every entry point below is called from ultramodern's threads, not from
+    // this object's owner, and two of those calls can arrive when there is
+    // nothing to call into: before setup succeeded, and after shutdown() has
+    // ended the application. A null check alone only covers the first -- the
+    // second leaves `app` non-null but no longer usable, which is a
+    // use-after-end that reads exactly like a working pointer.
+    bool usable() const {
+        return app != nullptr && !ended.load(std::memory_order_acquire);
+    }
+
     std::unique_ptr<RT64::Application> app;
+
+    // Set by shutdown(). Atomic because shutdown() and the renderer thread do
+    // not otherwise synchronise with each other.
+    std::atomic<bool> ended{false};
 };
 
 RT64Context::RT64Context(uint8_t* rdram,
@@ -217,6 +231,9 @@ RT64Context::RT64Context(uint8_t* rdram,
 }
 
 void RT64Context::send_dl(const OSTask* task) {
+    if (!usable()) {
+        return;
+    }
     // The game's display list, handed over by librecomp instead of being run on
     // an emulated RSP. Phase 00 established this game uses stock F3DEX.NoN 1.23,
     // which RT64 identifies from the microcode address below.
@@ -226,6 +243,9 @@ void RT64Context::send_dl(const OSTask* task) {
 }
 
 void RT64Context::send_dummy_workload(uint32_t fb_address) {
+    if (!usable()) {
+        return;
+    }
     // Give the VI something real to present before the game submits its first
     // display list: a fill of the whole 320x240 framebuffer through the RDP.
     // Without it the first frames present whatever RDRAM happens to contain.
@@ -240,6 +260,9 @@ void RT64Context::send_dummy_workload(uint32_t fb_address) {
 }
 
 void RT64Context::update_screen() {
+    if (!usable()) {
+        return;
+    }
     // Publish that the VI thread has run at least once. main() waits on this
     // before starting the game: ultramodern's VI thread only seeds a video mode
     // while the game has not started, so starting first races it and the update
@@ -249,6 +272,13 @@ void RT64Context::update_screen() {
 }
 
 void RT64Context::shutdown() {
+    // Mark it unusable first. Ending the application while another thread is
+    // part-way through updateScreen() is the same defect as calling into it
+    // afterwards, and setting the flag first closes the window in which a call
+    // can start.
+    if (ended.exchange(true, std::memory_order_acq_rel)) {
+        return;   // already shut down
+    }
     if (app != nullptr) {
         app->end();
     }
@@ -256,7 +286,7 @@ void RT64Context::shutdown() {
 
 bool RT64Context::update_config(const ultramodern::renderer::GraphicsConfig& old_config,
                                 const ultramodern::renderer::GraphicsConfig& new_config) {
-    if (app == nullptr || old_config == new_config) {
+    if (!usable() || old_config == new_config) {
         return false;
     }
     if (new_config.wm_option != old_config.wm_option) {
@@ -275,7 +305,7 @@ void RT64Context::enable_instant_present() {
 }
 
 uint32_t RT64Context::get_display_framerate() const {
-    if (app != nullptr && app->appWindow != nullptr) {
+    if (usable() && app->appWindow != nullptr) {
         const uint32_t rate = app->appWindow->getRefreshRate();
         if (rate != 0) {
             return rate;
@@ -285,7 +315,7 @@ uint32_t RT64Context::get_display_framerate() const {
 }
 
 float RT64Context::get_resolution_scale() const {
-    if (app != nullptr && app->userConfig.resolution == RT64::UserConfiguration::Resolution::Manual) {
+    if (usable() && app->userConfig.resolution == RT64::UserConfiguration::Resolution::Manual) {
         return static_cast<float>(app->userConfig.resolutionMultiplier);
     }
     return 1.0f;
