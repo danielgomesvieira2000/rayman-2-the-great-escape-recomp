@@ -280,6 +280,92 @@ the structure is required to be under `0x100`, so the question is what fills
 that structure, and that is a data-flow question to answer by tracing
 `func_80088B5C`'s caller rather than by looking for names.
 
+## Tracing the assert: what the structure is
+
+The failing check was traced from the `break` outwards. The whole chain sits in
+the main segment and is reached from three sites in early initialisation:
+
+```
+func_80028BE0 / func_80028CA8 / func_80028D9C   (three call sites)
+  func_80088A80
+    func_80088AA8
+      func_80088B00      walks a linked list
+        func_80088B5C    serialises one node   <- asserts here
+          func_8008F86C  break 255
+```
+
+**`func_80088B00` is a filtered list walk.** It loads the head from `*(a0)`,
+and for each node tests a caller-supplied mask against a 16-bit field, calling
+the serialiser only on a match, then follows `next`:
+
+```
+s0 = *(a0)                    ; list head
+loop:
+  v0 = *(u16*)(s0 + 0x10)     ; type/flags
+  if ((s1 & v0) == 0) skip    ; s1 is the mask passed in a2
+  func_80088B5C(s0, &out)
+skip:
+  s0 = *(u32*)(s0 + 0x0)      ; next
+```
+
+So the node layout, as used here, is `0x0` next, `0xC` the asserted field,
+`0x10` a combined type/flags halfword. `func_80088B5C` dispatches on the top six
+bits of that halfword (`flags & 0xFC00`, compared against `0x1000` and `0x3000`),
+so the field is a small type tag in the high bits with flag bits below.
+
+**The assert guards a narrowing conversion.** Immediately after the check:
+
+```
+lw  $v0, 0xC($s0)      ; the field
+jal func_80088E68      ; (buffer, 1, 1, stream)
+sb  $v0, 0x28($sp)     ; written as ONE BYTE
+```
+
+The value has to be under `0x100` because it is about to be stored with `sb`.
+So the field is an identifier or index that the format allows one byte for, and
+the assertion is the game checking that assumption before truncating. This is a
+serialiser: it walks an object list, selects by type, and emits a compact byte
+stream.
+
+## What that does and does not settle
+
+It settles the mechanism completely, and it rules out the boring explanations --
+this is not a null pointer, not an unmapped address, and not a hardware register.
+The list is being walked and nodes are being visited; one of them carries a value
+in `0xC` that does not fit a byte.
+
+It does not settle **why**, and the honest position is that this cannot be
+answered by more reading. Two possibilities remain, and they need different
+fixes:
+
+1. The list or its nodes contain data the port never correctly filled -- the
+   likelier of the two, since a retail cartridge does not normally trip its own
+   assertions during boot.
+2. The walk itself is wrong -- a bad head pointer would produce a plausible-
+   looking chain of nonsense with no null to stop it.
+
+Distinguishing them needs the runtime value of that field and the node address
+it came from, and neither is available today: librecomp's `do_break` receives
+only the faulting vram (`recomp.cpp:467`), with no context and no RDRAM, so the
+crash reporter that served so well for access violations cannot help here.
+
+**Three ways to get it, in increasing cost:**
+
+- **Patch the instruction.** `recomp/rayman2.us.toml` supports
+  `[[patches.instruction]]`, so the assert's branch can be neutralised for one
+  run. That does not explain anything, but it answers a genuinely useful
+  question cheaply: whether this invariant is load-bearing or whether boot
+  simply continues past it. One config line and one rebuild.
+- **The patches layer.** `RECOMP_HOOK` on `func_80088B5C` can print the node
+  address and the field. This is the designed mechanism and the right answer,
+  and it needs the MIPS cross-toolchain (LLVM 18.1.8) that BUILDING.md already
+  lists -- currently scheduled for phase 06.
+- **Trace the three callers** at `func_80028BE0`, `func_80028CA8` and
+  `func_80028D9C` to find what builds the list in the first place.
+
+The first is worth doing before the second, because if boot continues past the
+assert then the invariant is advisory and the search moves elsewhere entirely.
+
 ## Still outstanding
 
 - **Nineteen functions in the boot segment poke hardware registers** (a scan for
