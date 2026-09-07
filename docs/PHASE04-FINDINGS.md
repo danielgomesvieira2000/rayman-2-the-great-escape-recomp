@@ -93,11 +93,74 @@ Each from its own body, never from a guess:
   body converts the frequency to a DAC rate in floating point and writes
   AI_DACRATE and AI_BITRATE.
 
+## What the counter found
+
+`src/rt64_context.cpp` now counts VI frames, display lists and dummy workloads,
+and announces the first display list. It answered the question on the first run,
+and the answer was none of the three possibilities above:
+
+```
+[rayman2] frames  63 (+63/s)  display lists 0 (+0/s)  dummy 10 (+10/s)
+[rayman2] entering recomp_entrypoint -- the game thread is running
+[rayman2] recomp_entrypoint returned                       <-- !
+[rayman2] frames 609 (+61/s)  display lists 0 (+0/s)  dummy 10 (+0/s)
+```
+
+**The entrypoint returned**, within a second, and the VI then ticked at 60/s over
+an empty screen indefinitely. Nothing was stuck and nothing had failed.
+
+That is *correct* libultra behaviour, and reading main confirms it: it calls
+`osInitialize`, sets the audio rate, calls `osCreateThread` with entry
+`0x800004C0`, calls `osStartThread`, and returns. The game is supposed to
+continue on the created thread.
+
+The created thread never ran. The game's own `osCreateThread` and
+`osStartThread` were being recompiled: they build an `OSThread` and push it onto
+the game's idea of a run queue, but **ultramodern owns the scheduler in this
+port and knows nothing about that structure**. The thread was created, marked
+runnable, and never scheduled. Nothing crashed; the game simply ran out of
+things to do.
+
+Naming both -- each proven from its body, and both reimplemented by librecomp --
+started the thread. The stack now shows it plainly:
+
+```
+run_thread_function          <- ultramodern scheduling the game's thread
+  func_800004C0              <- the entry main passed to osCreateThread
+    func_80002690
+      func_8000B190
+        ...
+```
+
+## The pattern this exposed, which is the phase's real finding
+
+With threading handed over, the next faults were all the same shape: a read a
+few bytes into a null pointer, deep in the game's libultra.
+
+| Function | Fault | What it is |
+|---|---|---|
+| `func_8000D080` | reads null+4 | `osGetThreadPri` |
+| `func_8000D430` | reads null+4 | `osSetThreadPri` |
+| (next) | writes null+0x12 | not yet identified |
+
+The cause is one thing, not three. `osGetThreadPri` is
+`if (t == NULL) t = __osRunningThread; return t->priority;`. The game's
+`__osRunningThread` global (`D_8001A340`) is never set any more, because
+ultramodern is the scheduler. So the null default resolves to null, and the
+field read faults.
+
+**Every part of the game's libultra that reads scheduler state has to become the
+runtime's.** `D_8001A340` is read in **30 places** in the boot segment, so this
+is a body of work rather than a couple of names -- but it is mechanical, each
+one is proven from its body, and the fault signature (a small offset from null,
+on the game thread) identifies the class instantly.
+
 ## Where it stops now
 
-The game runs. A window titled "Rayman 2: The Great Escape — Recompiled" opens,
-the process holds ~40 threads, CPU climbs steadily, and it never exits or
-faults. The client area stays black.
+The game thread now runs real code under ultramodern's scheduler and gets
+several calls deep before faulting on the next unnamed libultra threading
+routine. Still no display lists, so nothing renders yet -- but the reason is now
+known and specific rather than a black screen with no explanation.
 
 So execution is proceeding and **nothing is reaching the renderer**. The next
 question is which of these it is, and they are distinguishable:

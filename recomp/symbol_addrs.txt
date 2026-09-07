@@ -155,3 +155,55 @@ osInitialize = 0x80003EE0; // type:func
 // would oblige this port to emulate the AI registers itself, which is work the
 // runtime has already done.
 osAiSetFrequency = 0x80007850; // type:func
+
+// ---------------------------------------------------------------------------
+// Threading. This is why the screen was black.
+//
+// The counters in src/rt64_context.cpp showed the VI ticking at 60/s with zero
+// display lists, and the entrypoint wrapper showed recomp_entrypoint RETURNING
+// within a second. Both are correct behaviour: libultra's boot main calls
+// osInitialize, sets the audio rate, creates a thread whose entry is
+// 0x800004C0, starts it, and returns. The game then lives on that thread.
+//
+// It never ran, because the game's own osCreateThread/osStartThread were being
+// recompiled. They build an OSThread and push it onto the game's idea of a run
+// queue -- but ultramodern owns the scheduler in this port and knows nothing
+// about that structure, so the thread is created, marked runnable, and never
+// scheduled. Nothing crashes; the game simply stops having anything to do.
+//
+// Both are reimplemented by librecomp, so naming them hands threading to the
+// runtime, which is the only place it can work.
+// ---------------------------------------------------------------------------
+
+// Six arguments (thread, id, entry, arg, sp, pri), seeds the saved FPU control
+// word with 0x1000800, and points the thread's return address at a cleanup
+// routine. Called from main with entry 0x800004C0.
+osCreateThread = 0x80003DF0; // type:func
+
+// Takes a thread pointer, enters a critical section via __osDisableInt, reads
+// the state field at offset 0x10, accepts STOPPED (1) or WAITING (8), writes
+// RUNNABLE (2) and enqueues on the run queue.
+osStartThread = 0x800042A0; // type:func
+
+// `if (t == NULL) t = *__osRunningThread; return t->priority;` -- the priority
+// field is at offset 0x4, which the osStartThread body above corroborates by
+// reading `state` at 0x10 in the same structure. That is osGetThreadPri.
+//
+// It faulted reading null+4, and the reason generalises: the global at
+// D_8001A340 is the game's own __osRunningThread, and nothing sets it any more.
+// ultramodern owns the scheduler now, so every piece of the game's libultra
+// that reads scheduler state -- the run queue, the running thread -- is reading
+// a structure the runtime never touches. Those functions cannot be recompiled;
+// they have to be the runtime's. Expect more of these, and expect them to look
+// like null dereferences a few fields into a libultra structure.
+osGetThreadPri = 0x8000D080; // type:func
+
+// Two arguments (thread, priority), enters a critical section via
+// __osDisableInt, then null-defaults the thread to __osRunningThread exactly as
+// osGetThreadPri above does. That is osSetThreadPri, and it faulted on the same
+// null+4 read for the same reason.
+//
+// Scale note for whoever continues this: D_8001A340 (__osRunningThread) is read
+// in 30 places in the boot segment. The game's entire libultra threading layer
+// has to become the runtime's, not just the handful named so far.
+osSetThreadPri = 0x8000D430; // type:func

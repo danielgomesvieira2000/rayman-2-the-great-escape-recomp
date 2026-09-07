@@ -31,8 +31,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 
 #include "hle/rt64_application.h"
@@ -63,6 +65,33 @@ uint8_t  s_imem[0x1000]{};
 uint32_t s_mi_intr_reg = 0;
 uint32_t s_dpc_start_reg = 0, s_dpc_end_reg = 0, s_dpc_current_reg = 0, s_dpc_status_reg = 0;
 uint32_t s_dpc_clock_reg = 0, s_dpc_bufbusy_reg = 0, s_dpc_pipebusy_reg = 0, s_dpc_tmem_reg = 0;
+
+// ---------------------------------------------------------------------------
+// Boot instrumentation.
+//
+// The game runs but the screen is black, and there are three possible reasons
+// that look identical from outside: it is stuck in an early wait loop and has
+// not reached drawing; it is running its main loop but nothing reaches the
+// renderer; or display lists do arrive and RT64 draws nothing recognisable.
+//
+// These counters separate all three in a single run. update_screen ticks once
+// per VI, so frames counts whether the video path is alive at all, and
+// display_lists counts whether the game is actually submitting graphics:
+//
+//   frames 0                 -> the VI thread is not running; look there
+//   frames rising, lists 0   -> the game is not submitting; it is stuck earlier
+//   both rising              -> submission works; the problem is in drawing
+//
+// Set RAYMAN2_QUIET_BOOT to silence the periodic line once it has served.
+// ---------------------------------------------------------------------------
+std::atomic<uint64_t> g_display_lists{0};
+std::atomic<uint64_t> g_dummy_workloads{0};
+std::atomic<uint64_t> g_frames{0};
+
+bool quiet_boot() {
+    static const bool quiet = std::getenv("RAYMAN2_QUIET_BOOT") != nullptr;
+    return quiet;
+}
 
 // RT64 calls this when it would raise an RCP interrupt. Nothing here needs to
 // know: ultramodern owns interrupt scheduling.
@@ -234,6 +263,12 @@ void RT64Context::send_dl(const OSTask* task) {
     if (!usable()) {
         return;
     }
+    const uint64_t n = g_display_lists.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n == 1) {
+        std::fprintf(stderr,
+                     "[rayman2] FIRST DISPLAY LIST after %llu frames -- the game is drawing\n",
+                     static_cast<unsigned long long>(g_frames.load(std::memory_order_relaxed)));
+    }
     // The game's display list, handed over by librecomp instead of being run on
     // an emulated RSP. Phase 00 established this game uses stock F3DEX.NoN 1.23,
     // which RT64 identifies from the microcode address below.
@@ -246,6 +281,7 @@ void RT64Context::send_dummy_workload(uint32_t fb_address) {
     if (!usable()) {
         return;
     }
+    g_dummy_workloads.fetch_add(1, std::memory_order_relaxed);
     // Give the VI something real to present before the game submits its first
     // display list: a fill of the whole 320x240 framebuffer through the RDP.
     // Without it the first frames present whatever RDRAM happens to contain.
@@ -263,6 +299,32 @@ void RT64Context::update_screen() {
     if (!usable()) {
         return;
     }
+    g_frames.fetch_add(1, std::memory_order_relaxed);
+    if (!quiet_boot()) {
+        // update_screen is the VI thread and nothing else, so this bookkeeping
+        // needs no synchronisation of its own.
+        using clock = std::chrono::steady_clock;
+        static clock::time_point last = clock::now();
+        static uint64_t last_frames = 0, last_lists = 0, last_dummies = 0;
+
+        const clock::time_point now = clock::now();
+        if (now - last >= std::chrono::seconds(1)) {
+            const uint64_t f = g_frames.load(std::memory_order_relaxed);
+            const uint64_t d = g_display_lists.load(std::memory_order_relaxed);
+            const uint64_t u = g_dummy_workloads.load(std::memory_order_relaxed);
+            std::fprintf(stderr,
+                         "[rayman2] frames %llu (+%llu/s)  display lists %llu (+%llu/s)  dummy %llu (+%llu/s)\n",
+                         static_cast<unsigned long long>(f),
+                         static_cast<unsigned long long>(f - last_frames),
+                         static_cast<unsigned long long>(d),
+                         static_cast<unsigned long long>(d - last_lists),
+                         static_cast<unsigned long long>(u),
+                         static_cast<unsigned long long>(u - last_dummies));
+            last = now;
+            last_frames = f; last_lists = d; last_dummies = u;
+        }
+    }
+
     // Publish that the VI thread has run at least once. main() waits on this
     // before starting the game: ultramodern's VI thread only seeds a video mode
     // while the game has not started, so starting first races it and the update
