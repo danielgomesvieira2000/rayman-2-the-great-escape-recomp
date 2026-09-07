@@ -24,11 +24,56 @@
 # reads at +0xEEC and +0xF00 -- an "Unhandled mfc0: 10" that was a symptom of the
 # wrong length, not of an unsupported instruction. The real extent is 0xE20.
 #
-# text_address is where the RSP runs it, not where it lives in the ROM: task
-# microcode is DMA'd into IMEM, which is 0x04001000.
+# text_address is where the RSP runs it, and it is NOT the start of IMEM.
+#
+# Disassembling the shared boot stub settles it. rspboot is itself loaded at
+# IMEM 0x1000 and does:
+#
+#   0x1008  lw   $v0, 0x10($at)        ; task.ucode      ($at = 0xFC0)
+#   0x100C  addi $v1, $zero, 0xF7F     ; length - 1
+#   0x1010  addi $a3, $zero, 0x1080    ; IMEM destination
+#   0x1014  mtc0 $a3, SP_MEM_ADDR
+#   0x1018  mtc0 $v0, SP_DRAM_ADDR
+#   0x101C  mtc0 $v1, SP_RD_LEN
+#   0x1034  jr   $a3                   ; and enter it there
+#
+# So the microcode is loaded at 0x04001080 and entered at 0x04001080, leaving
+# the first 0x80 bytes of IMEM to the boot stub. Recompiling it as though it
+# began at 0x04001000 put every label 0x80 bytes away from the address the
+# jumps actually use, so control flow went to the wrong place immediately: the
+# first `jal` landed in the middle of a DMA helper and the command loop then
+# dispatched on microcode constants instead of an audio command list.
 text_offset          = 0x18A60
 text_size            = 0xE20
-text_address         = 0x04001000
+text_address         = 0x04001080
 rom_file_path        = "/mnt/c/Users/Daniel/claude-projects/n64recomp_rayman_2_greate_escape/rom.z64"
 output_file_path     = "/mnt/c/Users/Daniel/claude-projects/n64recomp_rayman_2_greate_escape/RecompiledRsp/rsp_audio.cpp"
 output_function_name = "rayman2_rsp_audio"
+
+# The command dispatch table, which no static scan can find.
+#
+# The microcode reads a command word from DMEM, takes the index from bits 30..24
+# doubled, and `jr`s through a table of sixteen halfwords living in ucode_data at
+# +0x10. The targets are therefore data, not code, and RSPRecomp cannot discover
+# them by following branches -- it reported the first one it reached, 0x12D0, as
+# an unhandled jump target. All sixteen are listed here, read straight out of the
+# ROM at 0x1C7B0, and every one lands inside the microcode's IMEM range of
+# 0x1080..0x1EA0, which is the check that they are really code addresses.
+extra_indirect_branch_targets = [
+    0x1118,
+    0x1470,
+    0x11DC,
+    0x1B38,
+    0x1214,
+    0x187C,
+    0x1254,
+    0x12D0,
+    0x12EC,
+    0x1328,
+    0x140C,
+    0x1294,
+    0x1E24,
+    0x138C,
+    0x170C,
+    0x144C
+]

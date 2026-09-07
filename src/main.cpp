@@ -208,11 +208,54 @@ void set_frequency(uint32_t frequency) {
     }
     g_audio_frequency = frequency;
     SDL_PauseAudioDevice(g_audio_device, 0);
+    std::fprintf(stderr, "[rayman2] audio device open: requested %u Hz, obtained %d Hz, %d ch\n",
+                 frequency, obtained.freq, (int)obtained.channels);
 }
 
+size_t get_frames_remaining();
+
 void queue_samples(int16_t* samples, size_t count) {
+    // Report the rate and the peak once a second while bringing audio up.
+    //
+    // "Samples are being queued" and "there is sound" are different claims: a
+    // microcode that runs to completion and writes silence produces exactly the
+    // same frame count as one that works. The peak distinguishes them, and it
+    // is the only part of the audio path that can be checked without listening.
+    {
+        static const bool probe = std::getenv("RAYMAN2_AUDIOPROBE") != nullptr;
+        if (probe) {
+            using clock = std::chrono::steady_clock;
+            static clock::time_point last = clock::now();
+            static uint64_t frames = 0;
+            static int peak = 0;
+            frames += count / 2;   // count is samples; report frames
+            for (size_t i = 0; i < count; ++i) {
+                const int v = samples[i] < 0 ? -samples[i] : samples[i];
+                if (v > peak) peak = v;
+            }
+            const clock::time_point now = clock::now();
+            if (now - last >= std::chrono::seconds(1)) {
+                std::fprintf(stderr, "[rayman2] audio %llu frames/s  peak %d  queued %zu\n",
+                             (unsigned long long)frames, peak, get_frames_remaining());
+                last = now; frames = 0; peak = 0;
+            }
+        }
+    }
+
+    // `count` is int16 samples, NOT stereo frames.
+    //
+    // The two audio callbacks use different units, which is easy to miss and
+    // was: ultramodern's queue_audio_buffer computes
+    // `sample_count = byte_count / sizeof(int16_t)` and passes that here, so it
+    // counts each channel separately -- while get_frames_remaining below is
+    // multiplied by `2 * sizeof(int16_t)` on the way back, so that one is
+    // frames. Multiplying this by the bytes-per-frame queued twice as many
+    // bytes as the game produced, which read past the buffer and made the
+    // output queue grow by about sixteen thousand frames a second until the
+    // sound was seconds behind the picture.
     if (g_audio_device != 0) {
-        SDL_QueueAudio(g_audio_device, samples, static_cast<uint32_t>(count * kBytesPerFrame));
+        SDL_QueueAudio(g_audio_device, samples,
+                       static_cast<uint32_t>(count * sizeof(int16_t)));
     }
 }
 

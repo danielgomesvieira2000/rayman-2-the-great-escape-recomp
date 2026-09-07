@@ -21,72 +21,72 @@ RspExitReason rayman2_rsp_audio(uint8_t* rdram, [[maybe_unused]] uint32_t ucode_
     r5 = 0;
     // andi        $4, $5, 0x1
     r4 = r5 & 0X1;
-    // beq         $4, $zero, L_1034
+    // beq         $4, $zero, L_10B4
     if (r4 == 0) {
         // andi        $4, $5, 0x100
         r4 = r5 & 0X100;
-        goto L_1034;
+        goto L_10B4;
     }
     // andi        $4, $5, 0x100
     r4 = r5 & 0X100;
-    // beq         $4, $zero, L_1034
+    // beq         $4, $zero, L_10B4
     if (r4 == 0) {
         // nop
     
-        goto L_1034;
+        goto L_10B4;
     }
     // nop
 
-L_1028:
+L_10A8:
     // mfc0        $4, DPC_STATUS
     r4 = 0;
     // andi        $4, $4, 0x100
     r4 = r4 & 0X100;
-    // bgtz        $4, L_1028
+    // bgtz        $4, L_10A8
     if (RSP_SIGNED(r4) > 0) {
         // nop
     
-        goto L_1028;
+        goto L_10A8;
     }
-L_1034:
+L_10B4:
     // nop
 
     // jal         0x1150
-    r31 = 0x1040;
+    r31 = 0x10C0;
     // nop
 
     goto L_1150;
     // nop
 
-L_1040:
+L_10C0:
     // addi        $2, $zero, 0xF
     r2 = RSP_ADD32(0, 0XF);
     // addi        $1, $zero, 0x320
     r1 = RSP_ADD32(0, 0X320);
-L_1048:
+L_10C8:
     // sw          $zero, 0x0($1)
     RSP_MEM_W_STORE(0X0, r1, 0);
-    // bgtz        $2, L_1048
+    // bgtz        $2, L_10C8
     if (RSP_SIGNED(r2) > 0) {
         // addi        $2, $2, -0x1
         r2 = RSP_ADD32(r2, -0X1);
-        goto L_1048;
+        goto L_10C8;
     }
     // addi        $2, $2, -0x1
     r2 = RSP_ADD32(r2, -0X1);
-L_1054:
+L_10D4:
     // mfc0        $2, SP_DMA_BUSY
     r2 = 0;
-    // bne         $2, $zero, L_1054
+    // bne         $2, $zero, L_10D4
     if (r2 != 0) {
         // addi        $29, $zero, 0x380
         r29 = RSP_ADD32(0, 0X380);
-        goto L_1054;
+        goto L_10D4;
     }
     // addi        $29, $zero, 0x380
     r29 = RSP_ADD32(0, 0X380);
     // mtc0        $zero, SP_SEMAPHORE
-L_1064:
+L_10E4:
     // lw          $26, 0x0($29)
     r26 = RSP_MEM_W_LOAD(0X0, r29);
     // lw          $25, 0x4($29)
@@ -117,38 +117,38 @@ L_1064:
 
     // break       0
     return RspExitReason::Broke;
-L_1098:
-    // bgtz        $30, L_1064
+L_1118:
+    // bgtz        $30, L_10E4
     if (RSP_SIGNED(r30) > 0) {
         // nop
     
-        goto L_1064;
+        goto L_10E4;
     }
     // nop
 
-    // blez        $27, L_10B8
+    // blez        $27, L_1138
     if (RSP_SIGNED(r27) <= 0) {
         // nop
     
-        goto L_10B8;
+        goto L_1138;
     }
     // nop
 
     // jal         0x1150
-    r31 = 0x10B0;
+    r31 = 0x1130;
     // nop
 
     goto L_1150;
     // nop
 
-L_10B0:
+L_1130:
     // j           L_10D4
     // nop
 
     goto L_10D4;
     // nop
 
-L_10B8:
+L_1138:
     // ori         $1, $zero, 0x4000
     r1 = 0 | 0X4000;
     // mtc0        $1, SP_STATUS
@@ -156,43 +156,43 @@ L_10B8:
     return RspExitReason::Broke;
     // nop
 
-L_10C8:
-    // b           L_10C8
+L_1148:
+    // b           L_1148
     // nop
 
-    goto L_10C8;
+    goto L_1148;
     // nop
 
+L_1150:
     // addi        $5, $ra, 0x0
     r5 = RSP_ADD32(r31, 0X0);
-L_10D4:
     // add         $2, $zero, $28
     r2 = RSP_ADD32(0, r28);
     // addi        $3, $27, 0x0
     r3 = RSP_ADD32(r27, 0X0);
     // addi        $4, $3, -0x140
     r4 = RSP_ADD32(r3, -0X140);
-    // blez        $4, L_10EC
+    // blez        $4, L_116C
     if (RSP_SIGNED(r4) <= 0) {
         // addi        $1, $zero, 0x380
         r1 = RSP_ADD32(0, 0X380);
-        goto L_10EC;
+        goto L_116C;
     }
     // addi        $1, $zero, 0x380
     r1 = RSP_ADD32(0, 0X380);
     // addi        $3, $zero, 0x140
     r3 = RSP_ADD32(0, 0X140);
-L_10EC:
+L_116C:
     // addi        $30, $3, 0x0
     r30 = RSP_ADD32(r3, 0X0);
     // jal         0x1184
-    r31 = 0x10F8;
+    r31 = 0x1178;
     // addi        $3, $3, -0x1
     r3 = RSP_ADD32(r3, -0X1);
     goto L_1184;
     // addi        $3, $3, -0x1
     r3 = RSP_ADD32(r3, -0X1);
-L_10F8:
+L_1178:
     // addi        $29, $zero, 0x380
     r29 = RSP_ADD32(0, 0X380);
     // jr          $5
@@ -203,27 +203,26 @@ L_10F8:
     goto do_indirect_jump;
     // nop
 
-L_1104:
+L_1184:
     // mfc0        $4, SP_SEMAPHORE
     r4 = 0;
-    // bne         $4, $zero, L_1104
+    // bne         $4, $zero, L_1184
     if (r4 != 0) {
         // nop
     
-        goto L_1104;
+        goto L_1184;
     }
     // nop
 
-L_1110:
+L_1190:
     // mfc0        $4, SP_DMA_FULL
     r4 = 0;
-    // bne         $4, $zero, L_1110
+    // bne         $4, $zero, L_1190
     if (r4 != 0) {
         // nop
     
-        goto L_1110;
+        goto L_1190;
     }
-L_1118:
     // nop
 
     // mtc0        $1, SP_MEM_ADDR
@@ -240,25 +239,25 @@ L_1118:
     goto do_indirect_jump;
     // nop
 
-L_1130:
+L_11B0:
     // mfc0        $4, SP_SEMAPHORE
     r4 = 0;
-    // bne         $4, $zero, L_1130
+    // bne         $4, $zero, L_11B0
     if (r4 != 0) {
         // nop
     
-        goto L_1130;
+        goto L_11B0;
     }
     // nop
 
-L_113C:
+L_11BC:
     // mfc0        $4, SP_DMA_FULL
     r4 = 0;
-    // bne         $4, $zero, L_113C
+    // bne         $4, $zero, L_11BC
     if (r4 != 0) {
         // nop
     
-        goto L_113C;
+        goto L_11BC;
     }
     // nop
 
@@ -266,7 +265,6 @@ L_113C:
     SET_DMA_MEM(r1);
     // mtc0        $2, SP_DRAM_ADDR
     SET_DMA_DRAM(r2);
-L_1150:
     // mtc0        $3, SP_WR_LEN
     DO_DMA_WRITE(r3);
     // jr          $ra
@@ -277,13 +275,14 @@ L_1150:
     goto do_indirect_jump;
     // nop
 
+L_11DC:
     // andi        $3, $25, 0xFFFF
     r3 = r25 & 0XFFFF;
-    // beq         $3, $zero, L_1098
+    // beq         $3, $zero, L_1118
     if (r3 == 0) {
         // addi        $4, $zero, 0x5C0
         r4 = RSP_ADD32(0, 0X5C0);
-        goto L_1098;
+        goto L_1118;
     }
     // addi        $4, $zero, 0x5C0
     r4 = RSP_ADD32(0, 0X5C0);
@@ -295,19 +294,18 @@ L_1150:
     rsp.VXOR<0>(rsp.vpu.r[1], rsp.vpu.r[1], rsp.vpu.r[1]);
     // addi        $3, $3, -0x10
     r3 = RSP_ADD32(r3, -0X10);
-L_1178:
+L_11F8:
     // sdv         $v1[0], 0x0($2)
     rsp.SDV<0>(rsp.vpu.r[1], r2, 0X0);
     // sdv         $v1[0], 0x8($2)
     rsp.SDV<0>(rsp.vpu.r[1], r2, 0X1);
     // addi        $2, $2, 0x10
     r2 = RSP_ADD32(r2, 0X10);
-L_1184:
-    // bgtz        $3, L_1178
+    // bgtz        $3, L_11F8
     if (RSP_SIGNED(r3) > 0) {
         // addi        $3, $3, -0x10
         r3 = RSP_ADD32(r3, -0X10);
-        goto L_1178;
+        goto L_11F8;
     }
     // addi        $3, $3, -0x10
     r3 = RSP_ADD32(r3, -0X10);
@@ -317,13 +315,14 @@ L_1184:
     goto L_1118;
     // nop
 
+L_1214:
     // lhu         $3, 0x4($24)
     r3 = RSP_MEM_HU_LOAD(0X4, r24);
-    // beq         $3, $zero, L_1098
+    // beq         $3, $zero, L_1118
     if (r3 == 0) {
         // sll         $2, $25, 8
         r2 = S32(r25) << 8;
-        goto L_1098;
+        goto L_1118;
     }
     // sll         $2, $25, 8
     r2 = S32(r25) << 8;
@@ -335,26 +334,25 @@ L_1184:
     r4 = S32(r4) << 2;
     // lw          $5, 0x320($4)
     r5 = RSP_MEM_W_LOAD(0X320, r4);
-L_11B0:
     // add         $2, $2, $5
     r2 = RSP_ADD32(r2, r5);
     // lhu         $1, 0x0($24)
     r1 = RSP_MEM_HU_LOAD(0X0, r24);
     // jal         0x1184
-    r31 = 0x11C0;
+    r31 = 0x1240;
     // addi        $3, $3, -0x1
     r3 = RSP_ADD32(r3, -0X1);
     goto L_1184;
     // addi        $3, $3, -0x1
     r3 = RSP_ADD32(r3, -0X1);
-L_11C0:
+L_1240:
     // mfc0        $1, SP_DMA_BUSY
     r1 = 0;
-    // bne         $1, $zero, L_11C0
+    // bne         $1, $zero, L_1240
     if (r1 != 0) {
         // nop
     
-        goto L_11C0;
+        goto L_1240;
     }
     // nop
 
@@ -362,13 +360,14 @@ L_11C0:
     // mtc0        $zero, SP_SEMAPHORE
     goto L_1118;
     // mtc0        $zero, SP_SEMAPHORE
+L_1254:
     // lhu         $3, 0x4($24)
     r3 = RSP_MEM_HU_LOAD(0X4, r24);
-    // beq         $3, $zero, L_1098
+    // beq         $3, $zero, L_1118
     if (r3 == 0) {
         // sll         $2, $25, 8
         r2 = S32(r25) << 8;
-        goto L_1098;
+        goto L_1118;
     }
     // sll         $2, $25, 8
     r2 = S32(r25) << 8;
@@ -385,20 +384,20 @@ L_11C0:
     // lhu         $1, 0x2($24)
     r1 = RSP_MEM_HU_LOAD(0X2, r24);
     // jal         0x11B0
-    r31 = 0x1200;
+    r31 = 0x1280;
     // addi        $3, $3, -0x1
     r3 = RSP_ADD32(r3, -0X1);
     goto L_11B0;
     // addi        $3, $3, -0x1
     r3 = RSP_ADD32(r3, -0X1);
-L_1200:
+L_1280:
     // mfc0        $1, SP_DMA_BUSY
     r1 = 0;
-    // bne         $1, $zero, L_1200
+    // bne         $1, $zero, L_1280
     if (r1 != 0) {
         // nop
     
-        goto L_1200;
+        goto L_1280;
     }
     // nop
 
@@ -406,6 +405,7 @@ L_1200:
     // mtc0        $zero, SP_SEMAPHORE
     goto L_1118;
     // mtc0        $zero, SP_SEMAPHORE
+L_1294:
     // sll         $2, $25, 8
     r2 = S32(r25) << 8;
     // srl         $2, $2, 8
@@ -423,20 +423,20 @@ L_1200:
     // andi        $3, $26, 0xFFFF
     r3 = r26 & 0XFFFF;
     // jal         0x1184
-    r31 = 0x123C;
+    r31 = 0x12BC;
     // addi        $3, $3, -0x1
     r3 = RSP_ADD32(r3, -0X1);
     goto L_1184;
     // addi        $3, $3, -0x1
     r3 = RSP_ADD32(r3, -0X1);
-L_123C:
+L_12BC:
     // mfc0        $1, SP_DMA_BUSY
     r1 = 0;
-    // bne         $1, $zero, L_123C
+    // bne         $1, $zero, L_12BC
     if (r1 != 0) {
         // nop
     
-        goto L_123C;
+        goto L_12BC;
     }
     // nop
 
@@ -444,6 +444,7 @@ L_123C:
     // mtc0        $zero, SP_SEMAPHORE
     goto L_1118;
     // mtc0        $zero, SP_SEMAPHORE
+L_12D0:
     // sll         $3, $25, 8
     r3 = S32(r25) << 8;
     // srl         $3, $3, 8
@@ -460,6 +461,7 @@ L_123C:
     goto L_1118;
     // sw          $3, 0x320($4)
     RSP_MEM_W_STORE(0X320, r4, r3);
+L_12EC:
     // addi        $1, $26, 0x5C0
     r1 = RSP_ADD32(r26, 0X5C0);
     // srl         $2, $25, 16
@@ -470,11 +472,11 @@ L_123C:
     r4 = S32(U32(r26) >> 16);
     // andi        $4, $4, 0x8
     r4 = r4 & 0X8;
-    // bgtz        $4, L_1298
+    // bgtz        $4, L_1318
     if (RSP_SIGNED(r4) > 0) {
         // addi        $3, $25, 0x5C0
         r3 = RSP_ADD32(r25, 0X5C0);
-        goto L_1298;
+        goto L_1318;
     }
     // addi        $3, $25, 0x5C0
     r3 = RSP_ADD32(r25, 0X5C0);
@@ -488,7 +490,7 @@ L_123C:
     goto L_1118;
     // sh          $25, 0x4($24)
     RSP_MEM_H_STORE(0X4, r24, r25);
-L_1298:
+L_1318:
     // sh          $3, 0xE($24)
     RSP_MEM_H_STORE(0XE, r24, r3);
     // sh          $1, 0xA($24)
@@ -499,15 +501,16 @@ L_1298:
     goto L_1118;
     // sh          $2, 0xC($24)
     RSP_MEM_H_STORE(0XC, r24, r2);
+L_1328:
     // srl         $2, $26, 16
     r2 = S32(U32(r26) >> 16);
     // andi        $1, $2, 0x8
     r1 = r2 & 0X8;
-    // beq         $1, $zero, L_12C4
+    // beq         $1, $zero, L_1344
     if (r1 == 0) {
         // andi        $1, $2, 0x4
         r1 = r2 & 0X4;
-        goto L_12C4;
+        goto L_1344;
     }
     // andi        $1, $2, 0x4
     r1 = r2 & 0X4;
@@ -519,20 +522,20 @@ L_1298:
     goto L_1118;
     // sh          $25, 0x1E($24)
     RSP_MEM_H_STORE(0X1E, r24, r25);
-L_12C4:
-    // beq         $1, $zero, L_12E4
+L_1344:
+    // beq         $1, $zero, L_1364
     if (r1 == 0) {
         // andi        $1, $2, 0x2
         r1 = r2 & 0X2;
-        goto L_12E4;
+        goto L_1364;
     }
     // andi        $1, $2, 0x2
     r1 = r2 & 0X2;
-    // beq         $1, $zero, L_12DC
+    // beq         $1, $zero, L_135C
     if (r1 == 0) {
         // nop
     
-        goto L_12DC;
+        goto L_135C;
     }
     // nop
 
@@ -542,19 +545,19 @@ L_12C4:
     goto L_1118;
     // sh          $26, 0x6($24)
     RSP_MEM_H_STORE(0X6, r24, r26);
-L_12DC:
+L_135C:
     // j           L_1118
     // sh          $26, 0x8($24)
     RSP_MEM_H_STORE(0X8, r24, r26);
     goto L_1118;
     // sh          $26, 0x8($24)
     RSP_MEM_H_STORE(0X8, r24, r26);
-L_12E4:
-    // beq         $1, $zero, L_12FC
+L_1364:
+    // beq         $1, $zero, L_137C
     if (r1 == 0) {
         // srl         $1, $25, 16
         r1 = S32(U32(r25) >> 16);
-        goto L_12FC;
+        goto L_137C;
     }
     // srl         $1, $25, 16
     r1 = S32(U32(r25) >> 16);
@@ -568,7 +571,7 @@ L_12E4:
     goto L_1118;
     // sh          $25, 0x14($24)
     RSP_MEM_H_STORE(0X14, r24, r25);
-L_12FC:
+L_137C:
     // sh          $26, 0x16($24)
     RSP_MEM_H_STORE(0X16, r24, r26);
     // sh          $1, 0x18($24)
@@ -579,15 +582,16 @@ L_12FC:
     goto L_1118;
     // sh          $25, 0x1A($24)
     RSP_MEM_H_STORE(0X1A, r24, r25);
+L_138C:
     // lhu         $1, 0x4($24)
     r1 = RSP_MEM_HU_LOAD(0X4, r24);
     // lhu         $4, 0x2($24)
     r4 = RSP_MEM_HU_LOAD(0X2, r24);
-    // beq         $1, $zero, L_1098
+    // beq         $1, $zero, L_1118
     if (r1 == 0) {
         // andi        $3, $25, 0xFFFF
         r3 = r25 & 0XFFFF;
-        goto L_1098;
+        goto L_1118;
     }
     // andi        $3, $25, 0xFFFF
     r3 = r25 & 0XFFFF;
@@ -597,7 +601,7 @@ L_12FC:
     r2 = S32(U32(r25) >> 16);
     // addi        $2, $2, 0x5C0
     r2 = RSP_ADD32(r2, 0X5C0);
-L_1328:
+L_13A8:
     // lqv         $v1[0], 0x0($2)
     rsp.LQV<0>(rsp.vpu.r[1], r2, 0X0);
     // lqv         $v2[0], 0x0($3)
@@ -640,11 +644,11 @@ L_1328:
     r2 = RSP_ADD32(r2, 0X10);
     // addi        $3, $3, 0x10
     r3 = RSP_ADD32(r3, 0X10);
-    // bgtz        $1, L_1328
+    // bgtz        $1, L_13A8
     if (RSP_SIGNED(r1) > 0) {
         // addi        $4, $4, 0x20
         r4 = RSP_ADD32(r4, 0X20);
-        goto L_1328;
+        goto L_13A8;
     }
     // addi        $4, $4, 0x20
     r4 = RSP_ADD32(r4, 0X20);
@@ -654,13 +658,14 @@ L_1328:
     goto L_1118;
     // nop
 
+L_140C:
     // andi        $1, $25, 0xFFFF
     r1 = r25 & 0XFFFF;
-    // beq         $1, $zero, L_1098
+    // beq         $1, $zero, L_1118
     if (r1 == 0) {
         // andi        $2, $26, 0xFFFF
         r2 = r26 & 0XFFFF;
-        goto L_1098;
+        goto L_1118;
     }
     // andi        $2, $26, 0xFFFF
     r2 = r26 & 0XFFFF;
@@ -670,7 +675,7 @@ L_1328:
     r3 = S32(U32(r25) >> 16);
     // addi        $3, $3, 0x5C0
     r3 = RSP_ADD32(r3, 0X5C0);
-L_13A4:
+L_1424:
     // ldv         $v1[0], 0x0($2)
     rsp.LDV<0>(rsp.vpu.r[1], r2, 0X0);
     // ldv         $v2[0], 0x8($2)
@@ -683,11 +688,11 @@ L_13A4:
     rsp.SDV<0>(rsp.vpu.r[1], r3, 0X0);
     // sdv         $v2[0], 0x8($3)
     rsp.SDV<0>(rsp.vpu.r[2], r3, 0X1);
-    // bgtz        $1, L_13A4
+    // bgtz        $1, L_1424
     if (RSP_SIGNED(r1) > 0) {
         // addi        $3, $3, 0x10
         r3 = RSP_ADD32(r3, 0X10);
-        goto L_13A4;
+        goto L_1424;
     }
     // addi        $3, $3, 0x10
     r3 = RSP_ADD32(r3, 0X10);
@@ -697,6 +702,7 @@ L_13A4:
     goto L_1118;
     // nop
 
+L_144C:
     // sll         $1, $25, 8
     r1 = S32(r25) << 8;
     // srl         $1, $1, 8
@@ -717,6 +723,7 @@ L_13A4:
     goto L_1118;
     // nop
 
+L_1470:
     // lqv         $v31[0], 0x0($zero)
     rsp.LQV<0>(rsp.vpu.r[31], 0, 0X0);
     // vxor        $v27, $v27, $v27
@@ -769,49 +776,49 @@ L_13A4:
     r1 = S32(U32(r26) >> 16);
     // andi        $1, $1, 0x1
     r1 = r1 & 0X1;
-    // bgtz        $1, L_148C
+    // bgtz        $1, L_150C
     if (RSP_SIGNED(r1) > 0) {
         // srl         $1, $26, 16
         r1 = S32(U32(r26) >> 16);
-        goto L_148C;
+        goto L_150C;
     }
     // srl         $1, $26, 16
     r1 = S32(U32(r26) >> 16);
     // andi        $1, $1, 0x2
     r1 = r1 & 0X2;
-    // beq         $zero, $1, L_1470
+    // beq         $zero, $1, L_14F0
     if (0 == r1) {
         // addi        $2, $17, 0x0
         r2 = RSP_ADD32(r17, 0X0);
-        goto L_1470;
+        goto L_14F0;
     }
     // addi        $2, $17, 0x0
     r2 = RSP_ADD32(r17, 0X0);
     // lw          $2, 0x10($24)
     r2 = RSP_MEM_W_LOAD(0X10, r24);
-L_1470:
+L_14F0:
     // addi        $1, $19, 0x0
     r1 = RSP_ADD32(r19, 0X0);
     // jal         0x1184
-    r31 = 0x147C;
+    r31 = 0x14FC;
     // addi        $3, $zero, 0x1F
     r3 = RSP_ADD32(0, 0X1F);
     goto L_1184;
     // addi        $3, $zero, 0x1F
     r3 = RSP_ADD32(0, 0X1F);
-L_147C:
+L_14FC:
     // mfc0        $5, SP_DMA_BUSY
     r5 = 0;
-    // bne         $5, $zero, L_147C
+    // bne         $5, $zero, L_14FC
     if (r5 != 0) {
         // nop
     
-        goto L_147C;
+        goto L_14FC;
     }
     // nop
 
     // mtc0        $zero, SP_SEMAPHORE
-L_148C:
+L_150C:
     // addi        $16, $zero, 0x30
     r16 = RSP_ADD32(0, 0X30);
     // addi        $15, $zero, 0x4C0
@@ -828,11 +835,11 @@ L_148C:
     rsp.LQV<0>(rsp.vpu.r[27], r19, 0X1);
     // addi        $19, $19, 0x20
     r19 = RSP_ADD32(r19, 0X20);
-    // beq         $18, $zero, L_1668
+    // beq         $18, $zero, L_16E8
     if (r18 == 0) {
         // ldv         $v1[0], 0x0($20)
         rsp.LDV<0>(rsp.vpu.r[1], r20, 0X0);
-        goto L_1668;
+        goto L_16E8;
     }
     // ldv         $v1[0], 0x0($20)
     rsp.LDV<0>(rsp.vpu.r[1], r20, 0X0);
@@ -900,7 +907,7 @@ L_148C:
     r13 = RSP_ADD32(r13, -0X2);
     // lrv         $v13[0], 0x20($13)
     rsp.LRV<0>(rsp.vpu.r[13], r13, 0X2);
-L_1534:
+L_15B4:
     // addi        $20, $20, 0x9
     r20 = RSP_ADD32(r20, 0X9);
     // vmudn       $v30, $v3, $v23
@@ -917,11 +924,11 @@ L_1534:
     r1 = RSP_MEM_BU(0X0, r21);
     // vmadn       $v29, $v6, $v23
     rsp.VMADN<0>(rsp.vpu.r[29], rsp.vpu.r[6], rsp.vpu.r[23]);
-    // blez        $14, L_1564
+    // blez        $14, L_15E4
     if (RSP_SIGNED(r14) <= 0) {
         // andi        $11, $1, 0xF
         r11 = r1 & 0XF;
-        goto L_1564;
+        goto L_15E4;
     }
     // andi        $11, $1, 0xF
     r11 = r1 & 0XF;
@@ -929,7 +936,7 @@ L_1534:
     rsp.VMUDM<8>(rsp.vpu.r[30], rsp.vpu.r[30], rsp.vpu.r[22]);
     // vmudm       $v29, $v29, $v22[0]
     rsp.VMUDM<8>(rsp.vpu.r[29], rsp.vpu.r[29], rsp.vpu.r[22]);
-L_1564:
+L_15E4:
     // sll         $11, $11, 5
     r11 = S32(r11) << 5;
     // vand        $v3, $v25, $v1[0]
@@ -1056,34 +1063,34 @@ L_1564:
     rsp.SDV<0>(rsp.vpu.r[27], r19, 0X2);
     // sdv         $v27[8], 0x18($19)
     rsp.SDV<8>(rsp.vpu.r[27], r19, 0X3);
-    // bgtz        $18, L_1534
+    // bgtz        $18, L_15B4
     if (RSP_SIGNED(r18) > 0) {
         // addi        $19, $19, 0x20
         r19 = RSP_ADD32(r19, 0X20);
-        goto L_1534;
+        goto L_15B4;
     }
     // addi        $19, $19, 0x20
     r19 = RSP_ADD32(r19, 0X20);
-L_1668:
+L_16E8:
     // addi        $1, $19, -0x20
     r1 = RSP_ADD32(r19, -0X20);
     // addi        $2, $17, 0x0
     r2 = RSP_ADD32(r17, 0X0);
     // jal         0x11B0
-    r31 = 0x1678;
+    r31 = 0x16F8;
     // addi        $3, $zero, 0x1F
     r3 = RSP_ADD32(0, 0X1F);
     goto L_11B0;
     // addi        $3, $zero, 0x1F
     r3 = RSP_ADD32(0, 0X1F);
-L_1678:
+L_16F8:
     // mfc0        $5, SP_DMA_BUSY
     r5 = 0;
-    // bne         $5, $zero, L_1678
+    // bne         $5, $zero, L_16F8
     if (r5 != 0) {
         // nop
     
-        goto L_1678;
+        goto L_16F8;
     }
     // nop
 
@@ -1091,6 +1098,7 @@ L_1678:
     // mtc0        $zero, SP_SEMAPHORE
     goto L_1118;
     // mtc0        $zero, SP_SEMAPHORE
+L_170C:
     // lqv         $v31[0], 0x0($zero)
     rsp.LQV<0>(rsp.vpu.r[31], 0, 0X0);
     // vxor        $v28, $v28, $v28
@@ -1107,11 +1115,11 @@ L_1678:
     r19 = RSP_MEM_HU_LOAD(0X4, r24);
     // vxor        $v19, $v19, $v19
     rsp.VXOR<0>(rsp.vpu.r[19], rsp.vpu.r[19], rsp.vpu.r[19]);
-    // beq         $19, $zero, L_17F4
+    // beq         $19, $zero, L_1874
     if (r19 == 0) {
         // andi        $14, $26, 0xFFFF
         r14 = r26 & 0XFFFF;
-        goto L_17F4;
+        goto L_1874;
     }
     // andi        $14, $26, 0xFFFF
     r14 = r26 & 0XFFFF;
@@ -1149,11 +1157,11 @@ L_1678:
     r1 = S32(U32(r26) >> 16);
     // andi        $1, $1, 0x1
     r1 = r1 & 0X1;
-    // bgtz        $1, L_1720
+    // bgtz        $1, L_17A0
     if (RSP_SIGNED(r1) > 0) {
         // nop
     
-        goto L_1720;
+        goto L_17A0;
     }
     // nop
 
@@ -1162,25 +1170,25 @@ L_1678:
     // addi        $2, $18, 0x0
     r2 = RSP_ADD32(r18, 0X0);
     // jal         0x1184
-    r31 = 0x1710;
+    r31 = 0x1790;
     // addi        $3, $zero, 0x7
     r3 = RSP_ADD32(0, 0X7);
     goto L_1184;
     // addi        $3, $zero, 0x7
     r3 = RSP_ADD32(0, 0X7);
-L_1710:
+L_1790:
     // mfc0        $5, SP_DMA_BUSY
     r5 = 0;
-    // bne         $5, $zero, L_1710
+    // bne         $5, $zero, L_1790
     if (r5 != 0) {
         // nop
     
-        goto L_1710;
+        goto L_1790;
     }
     // nop
 
     // mtc0        $zero, SP_SEMAPHORE
-L_1720:
+L_17A0:
     // addi        $13, $zero, 0x4C0
     r13 = RSP_ADD32(0, 0X4C0);
     // addi        $1, $zero, 0x4
@@ -1229,7 +1237,7 @@ L_1720:
     rsp.LDV<0>(rsp.vpu.r[30], r21, 0X0);
     // ldv         $v30[8], 0x8($21)
     rsp.LDV<8>(rsp.vpu.r[30], r21, 0X1);
-L_1780:
+L_1800:
     // vmudh       $v16, $v25, $v28[6]
     rsp.VMUDH<14>(rsp.vpu.r[16], rsp.vpu.r[25], rsp.vpu.r[28]);
     // addi        $21, $21, 0x10
@@ -1270,11 +1278,11 @@ L_1780:
     rsp.SDV<0>(rsp.vpu.r[28], r20, 0X0);
     // sdv         $v28[8], 0x8($20)
     rsp.SDV<8>(rsp.vpu.r[28], r20, 0X1);
-    // bgtz        $19, L_1780
+    // bgtz        $19, L_1800
     if (RSP_SIGNED(r19) > 0) {
         // addi        $20, $20, 0x10
         r20 = RSP_ADD32(r20, 0X10);
-        goto L_1780;
+        goto L_1800;
     }
     // addi        $20, $20, 0x10
     r20 = RSP_ADD32(r20, 0X10);
@@ -1283,28 +1291,29 @@ L_1780:
     // addi        $2, $18, 0x0
     r2 = RSP_ADD32(r18, 0X0);
     // jal         0x11B0
-    r31 = 0x17E8;
+    r31 = 0x1868;
     // addi        $3, $zero, 0x7
     r3 = RSP_ADD32(0, 0X7);
     goto L_11B0;
     // addi        $3, $zero, 0x7
     r3 = RSP_ADD32(0, 0X7);
-L_17E8:
+L_1868:
     // mfc0        $5, SP_DMA_BUSY
     r5 = 0;
-    // bne         $5, $zero, L_17E8
+    // bne         $5, $zero, L_1868
     if (r5 != 0) {
         // nop
     
-        goto L_17E8;
+        goto L_1868;
     }
     // nop
 
-L_17F4:
+L_1874:
     // j           L_1118
     // mtc0        $zero, SP_SEMAPHORE
     goto L_1118;
     // mtc0        $zero, SP_SEMAPHORE
+L_187C:
     // lh          $8, 0x0($24)
     r8 = RSP_MEM_H_LOAD(0X0, r24);
     // lh          $19, 0x2($24)
@@ -1335,29 +1344,29 @@ L_17F4:
     r7 = S32(U32(r26) >> 16);
     // andi        $10, $7, 0x1
     r10 = r7 & 0X1;
-    // bgtz        $10, L_185C
+    // bgtz        $10, L_18DC
     if (RSP_SIGNED(r10) > 0) {
         // nop
     
-        goto L_185C;
+        goto L_18DC;
     }
     // nop
 
     // jal         0x1184
-    r31 = 0x1848;
+    r31 = 0x18C8;
     // nop
 
     goto L_1184;
     // nop
 
-L_1848:
+L_18C8:
     // mfc0        $1, SP_DMA_BUSY
     r1 = 0;
-    // bne         $1, $zero, L_1848
+    // bne         $1, $zero, L_18C8
     if (r1 != 0) {
         // nop
     
-        goto L_1848;
+        goto L_18C8;
     }
     // nop
 
@@ -1365,20 +1374,21 @@ L_1848:
     // mtc0        $zero, SP_SEMAPHORE
     goto L_18E8;
     // mtc0        $zero, SP_SEMAPHORE
-L_185C:
+L_18DC:
     // sh          $zero, 0x8($23)
     RSP_MEM_H_STORE(0X8, r23, 0);
     // vxor        $v16, $v16, $v16
     rsp.VXOR<0>(rsp.vpu.r[16], rsp.vpu.r[16], rsp.vpu.r[16]);
     // sdv         $v16[0], 0x0($23)
     rsp.SDV<0>(rsp.vpu.r[16], r23, 0X0);
+L_18E8:
     // andi        $10, $7, 0x2
     r10 = r7 & 0X2;
-    // beq         $10, $zero, L_1888
+    // beq         $10, $zero, L_1908
     if (r10 == 0) {
         // nop
     
-        goto L_1888;
+        goto L_1908;
     }
     // nop
 
@@ -1392,7 +1402,7 @@ L_185C:
     rsp.SDV<8>(rsp.vpu.r[3], r8, -0X1);
     // sub         $8, $8, $11
     r8 = RSP_SUB32(r8, r11);
-L_1888:
+L_1908:
     // addi        $8, $8, -0x8
     r8 = RSP_ADD32(r8, -0X8);
     // lsv         $v23[14], 0x8($23)
@@ -1441,7 +1451,6 @@ L_1888:
     r20 = RSP_ADD32(r23, 0X30);
     // vxor        $v22, $v22, $v22
     rsp.VXOR<0>(rsp.vpu.r[22], rsp.vpu.r[22], rsp.vpu.r[22]);
-L_18E8:
     // vmudm       $v23, $v31, $v23[7]
     rsp.VMUDM<15>(rsp.vpu.r[23], rsp.vpu.r[31], rsp.vpu.r[23]);
     // vmadm       $v22, $v25, $v18[4]
@@ -1498,6 +1507,7 @@ L_18E8:
     r10 = RSP_MEM_H_LOAD(0XE, r21);
     // lh          $2, 0xE($20)
     r2 = RSP_MEM_H_LOAD(0XE, r20);
+L_19D8:
     // ldv         $v16[0], 0x0($17)
     rsp.LDV<0>(rsp.vpu.r[16], r17, 0X0);
     // vmudm       $v23, $v31, $v23[7]
@@ -1562,7 +1572,6 @@ L_18E8:
     r17 = RSP_MEM_H_LOAD(0X0, r21);
     // vmulf       $v5, $v10, $v9
     rsp.VMULF<0>(rsp.vpu.r[5], rsp.vpu.r[10], rsp.vpu.r[9]);
-L_19D8:
     // lh          $9, 0x0($20)
     r9 = RSP_MEM_H_LOAD(0X0, r20);
     // vadd        $v8, $v8, $v8[1q]
@@ -1619,11 +1628,11 @@ L_19D8:
     r18 = RSP_ADD32(r18, -0X10);
     // sqv         $v4[0], 0x0($19)
     rsp.SQV<0>(rsp.vpu.r[4], r19, 0X0);
-    // blez        $18, L_1A58
+    // blez        $18, L_1AD8
     if (RSP_SIGNED(r18) <= 0) {
         // lh          $2, 0xE($20)
         r2 = RSP_MEM_H_LOAD(0XE, r20);
-        goto L_1A58;
+        goto L_1AD8;
     }
     // lh          $2, 0xE($20)
     r2 = RSP_MEM_H_LOAD(0XE, r20);
@@ -1633,7 +1642,7 @@ L_19D8:
     goto L_19D8;
     // addi        $19, $19, 0x10
     r19 = RSP_ADD32(r19, 0X10);
-L_1A58:
+L_1AD8:
     // ssv         $v23[0], 0x8($23)
     rsp.SSV<0>(rsp.vpu.r[23], r23, 0X4);
     // ldv         $v16[0], 0x0($17)
@@ -1650,17 +1659,17 @@ L_1A58:
     r4 = r5 & 0XF;
     // sub         $17, $17, $4
     r17 = RSP_SUB32(r17, r4);
-    // beq         $4, $zero, L_1A84
+    // beq         $4, $zero, L_1B04
     if (r4 == 0) {
         // addi        $7, $zero, 0x10
         r7 = RSP_ADD32(0, 0X10);
-        goto L_1A84;
+        goto L_1B04;
     }
     // addi        $7, $zero, 0x10
     r7 = RSP_ADD32(0, 0X10);
     // sub         $4, $7, $4
     r4 = RSP_SUB32(r7, r4);
-L_1A84:
+L_1B04:
     // sh          $4, 0xA($23)
     RSP_MEM_H_STORE(0XA, r23, r4);
     // ldv         $v3[0], 0x0($17)
@@ -1674,20 +1683,20 @@ L_1A84:
     // addi        $1, $23, 0x0
     r1 = RSP_ADD32(r23, 0X0);
     // jal         0x11B0
-    r31 = 0x1AA4;
+    r31 = 0x1B24;
     // addi        $3, $zero, 0x1F
     r3 = RSP_ADD32(0, 0X1F);
     goto L_11B0;
     // addi        $3, $zero, 0x1F
     r3 = RSP_ADD32(0, 0X1F);
-L_1AA4:
+L_1B24:
     // mfc0        $5, SP_DMA_BUSY
     r5 = 0;
-    // bne         $5, $zero, L_1AA4
+    // bne         $5, $zero, L_1B24
     if (r5 != 0) {
         // nop
     
-        goto L_1AA4;
+        goto L_1B24;
     }
     // nop
 
@@ -1695,6 +1704,7 @@ L_1AA4:
     // mtc0        $zero, SP_SEMAPHORE
     goto L_1118;
     // mtc0        $zero, SP_SEMAPHORE
+L_1B38:
     // lui         $4, 0xFF
     r4 = S32(0XFF << 16);
     // ori         $4, $4, 0xFFFF
@@ -1725,11 +1735,11 @@ L_1AA4:
     r12 = S32(U32(r26) >> 16);
     // andi        $10, $12, 0x1
     r10 = r12 & 0X1;
-    // beq         $10, $zero, L_1B04
+    // beq         $10, $zero, L_1B84
     if (r10 == 0) {
         // lqv         $v24[0], 0x10($24)
         rsp.LQV<0>(rsp.vpu.r[24], r24, 0X1);
-        goto L_1B04;
+        goto L_1B84;
     }
     // lqv         $v24[0], 0x10($24)
     rsp.LQV<0>(rsp.vpu.r[24], r24, 0X1);
@@ -1739,22 +1749,22 @@ L_1AA4:
     goto L_1BB0;
     // nop
 
-L_1B04:
+L_1B84:
     // jal         0x1184
-    r31 = 0x1B0C;
+    r31 = 0x1B8C;
     // nop
 
     goto L_1184;
     // nop
 
-L_1B0C:
+L_1B8C:
     // mfc0        $5, SP_DMA_BUSY
     r5 = 0;
-    // bne         $5, $zero, L_1B0C
+    // bne         $5, $zero, L_1B8C
     if (r5 != 0) {
         // nop
     
-        goto L_1B0C;
+        goto L_1B8C;
     }
     // nop
 
@@ -1769,6 +1779,7 @@ L_1B0C:
     rsp.LQV<0>(rsp.vpu.r[19], r23, 0X3);
     // lqv         $v24[0], 0x40($23)
     rsp.LQV<0>(rsp.vpu.r[24], r23, 0X4);
+L_1BB0:
     // lh          $13, 0x0($24)
     r13 = RSP_MEM_H_LOAD(0X0, r24);
     // lh          $19, 0x2($24)
@@ -1789,11 +1800,11 @@ L_1B0C:
     rsp.MFC2<8>(r20, rsp.vpu.r[24]);
     // andi        $9, $12, 0x8
     r9 = r12 & 0X8;
-    // bgtz        $9, L_1B6C
+    // bgtz        $9, L_1BEC
     if (RSP_SIGNED(r9) > 0) {
         // nop
     
-        goto L_1B6C;
+        goto L_1BEC;
     }
     // nop
 
@@ -1803,12 +1814,12 @@ L_1B0C:
     r16 = RSP_ADD32(0, r17);
     // addi        $15, $zero, 0x0
     r15 = RSP_ADD32(0, 0X0);
-L_1B6C:
-    // beq         $10, $zero, L_1C70
+L_1BEC:
+    // beq         $10, $zero, L_1CF0
     if (r10 == 0) {
         // lqv         $v30[0], 0x70($11)
         rsp.LQV<0>(rsp.vpu.r[30], r11, 0X7);
-        goto L_1C70;
+        goto L_1CF0;
     }
     // lqv         $v30[0], 0x70($11)
     rsp.LQV<0>(rsp.vpu.r[30], r11, 0X7);
@@ -1842,12 +1853,11 @@ L_1B6C:
     rsp.VMADM<15>(rsp.vpu.r[21], rsp.vpu.r[31], rsp.vpu.r[21]);
     // vmadh       $v20, $v31, $v20[7]
     rsp.VMADH<15>(rsp.vpu.r[20], rsp.vpu.r[31], rsp.vpu.r[20]);
-L_1BB0:
-    // bgtz        $21, L_1BC4
+    // bgtz        $21, L_1C44
     if (RSP_SIGNED(r21) > 0) {
         // vmadn       $v21, $v31, $v0[0]
         rsp.VMADN<8>(rsp.vpu.r[21], rsp.vpu.r[31], rsp.vpu.r[0]);
-        goto L_1BC4;
+        goto L_1C44;
     }
     // vmadn       $v21, $v31, $v0[0]
     rsp.VMADN<8>(rsp.vpu.r[21], rsp.vpu.r[31], rsp.vpu.r[0]);
@@ -1859,9 +1869,10 @@ L_1BB0:
     goto L_1C48;
     // nop
 
-L_1BC4:
+L_1C44:
     // vcl         $v20, $v20, $v24[0]
     rsp.VCL<8>(rsp.vpu.r[20], rsp.vpu.r[20], rsp.vpu.r[24]);
+L_1C48:
     // vmulf       $v16, $v20, $v24[6]
     rsp.VMULF<14>(rsp.vpu.r[16], rsp.vpu.r[20], rsp.vpu.r[24]);
     // vmulf       $v15, $v20, $v24[7]
@@ -1906,11 +1917,11 @@ L_1BC4:
     rsp.VMADM<15>(rsp.vpu.r[19], rsp.vpu.r[31], rsp.vpu.r[19]);
     // vmadh       $v18, $v31, $v18[7]
     rsp.VMADH<15>(rsp.vpu.r[18], rsp.vpu.r[31], rsp.vpu.r[18]);
-    // bgtz        $20, L_1C34
+    // bgtz        $20, L_1CB4
     if (RSP_SIGNED(r20) > 0) {
         // vmadn       $v19, $v31, $v0[0]
         rsp.VMADN<8>(rsp.vpu.r[19], rsp.vpu.r[31], rsp.vpu.r[0]);
-        goto L_1C34;
+        goto L_1CB4;
     }
     // vmadn       $v19, $v31, $v0[0]
     rsp.VMADN<8>(rsp.vpu.r[19], rsp.vpu.r[31], rsp.vpu.r[0]);
@@ -1922,9 +1933,10 @@ L_1BC4:
     goto L_1CB8;
     // nop
 
-L_1C34:
+L_1CB4:
     // vcl         $v18, $v18, $v24[3]
     rsp.VCL<11>(rsp.vpu.r[18], rsp.vpu.r[18], rsp.vpu.r[24]);
+L_1CB8:
     // vmulf       $v16, $v18, $v24[6]
     rsp.VMULF<14>(rsp.vpu.r[16], rsp.vpu.r[18], rsp.vpu.r[24]);
     // vmulf       $v15, $v18, $v24[7]
@@ -1933,7 +1945,6 @@ L_1C34:
     rsp.VMULF<14>(rsp.vpu.r[28], rsp.vpu.r[28], rsp.vpu.r[10]);
     // vmacf       $v28, $v17, $v16
     rsp.VMACF<0>(rsp.vpu.r[28], rsp.vpu.r[17], rsp.vpu.r[16]);
-L_1C48:
     // vmulf       $v26, $v26, $v10[6]
     rsp.VMULF<14>(rsp.vpu.r[26], rsp.vpu.r[26], rsp.vpu.r[10]);
     // vmacf       $v26, $v17, $v15
@@ -1954,7 +1965,7 @@ L_1C48:
     r17 = RSP_ADD32(r17, r15);
     // add         $16, $16, $15
     r16 = RSP_ADD32(r16, r15);
-L_1C70:
+L_1CF0:
     // vmudl       $v23, $v21, $v24[2]
     rsp.VMUDL<10>(rsp.vpu.r[23], rsp.vpu.r[21], rsp.vpu.r[24]);
     // vmadm       $v23, $v20, $v24[2]
@@ -1965,11 +1976,12 @@ L_1C70:
     rsp.VMADH<9>(rsp.vpu.r[20], rsp.vpu.r[20], rsp.vpu.r[24]);
     // vmadn       $v21, $v31, $v0[0]
     rsp.VMADN<8>(rsp.vpu.r[21], rsp.vpu.r[31], rsp.vpu.r[0]);
-    // bgtz        $21, L_1CB0
+L_1D04:
+    // bgtz        $21, L_1D30
     if (RSP_SIGNED(r21) > 0) {
         // lqv         $v17[0], 0x0($13)
         rsp.LQV<0>(rsp.vpu.r[17], r13, 0X0);
-        goto L_1CB0;
+        goto L_1D30;
     }
     // lqv         $v17[0], 0x0($13)
     rsp.LQV<0>(rsp.vpu.r[17], r13, 0X0);
@@ -1993,12 +2005,11 @@ L_1C70:
     goto L_1D50;
     // vmadn       $v19, $v31, $v0[0]
     rsp.VMADN<8>(rsp.vpu.r[19], rsp.vpu.r[31], rsp.vpu.r[0]);
-L_1CB0:
+L_1D30:
     // vcl         $v20, $v20, $v24[0]
     rsp.VCL<8>(rsp.vpu.r[20], rsp.vpu.r[20], rsp.vpu.r[24]);
     // vmudl       $v23, $v19, $v24[5]
     rsp.VMUDL<13>(rsp.vpu.r[23], rsp.vpu.r[19], rsp.vpu.r[24]);
-L_1CB8:
     // vmadm       $v23, $v18, $v24[5]
     rsp.VMADM<13>(rsp.vpu.r[23], rsp.vpu.r[18], rsp.vpu.r[24]);
     // vmadn       $v23, $v19, $v24[4]
@@ -2011,6 +2022,7 @@ L_1CB8:
     rsp.LQV<0>(rsp.vpu.r[27], r17, 0X0);
     // vmadn       $v19, $v31, $v0[0]
     rsp.VMADN<8>(rsp.vpu.r[19], rsp.vpu.r[31], rsp.vpu.r[0]);
+L_1D50:
     // vmulf       $v16, $v20, $v24[6]
     rsp.VMULF<14>(rsp.vpu.r[16], rsp.vpu.r[20], rsp.vpu.r[24]);
     // sqv         $v20[0], 0x0($23)
@@ -2031,17 +2043,16 @@ L_1CB8:
     rsp.LQV<0>(rsp.vpu.r[26], r16, 0X0);
     // vmacf       $v27, $v17, $v15
     rsp.VMACF<0>(rsp.vpu.r[27], rsp.vpu.r[17], rsp.vpu.r[15]);
-    // bgtz        $20, L_1D20
+    // bgtz        $20, L_1DA0
     if (RSP_SIGNED(r20) > 0) {
         // sqv         $v29[0], 0x0($19)
         rsp.SQV<0>(rsp.vpu.r[29], r19, 0X0);
-        goto L_1D20;
+        goto L_1DA0;
     }
     // sqv         $v29[0], 0x0($19)
     rsp.SQV<0>(rsp.vpu.r[29], r19, 0X0);
     // vge         $v18, $v18, $v24[3]
     rsp.VGE<11>(rsp.vpu.r[18], rsp.vpu.r[18], rsp.vpu.r[24]);
-L_1D04:
     // vmudl       $v23, $v21, $v24[2]
     rsp.VMUDL<10>(rsp.vpu.r[23], rsp.vpu.r[21], rsp.vpu.r[24]);
     // sqv         $v27[0], 0x0($17)
@@ -2058,7 +2069,7 @@ L_1D04:
     goto L_1DBC;
     // vmadn       $v21, $v31, $v0[0]
     rsp.VMADN<8>(rsp.vpu.r[21], rsp.vpu.r[31], rsp.vpu.r[0]);
-L_1D20:
+L_1DA0:
     // vcl         $v18, $v18, $v24[3]
     rsp.VCL<11>(rsp.vpu.r[18], rsp.vpu.r[18], rsp.vpu.r[24]);
     // vmudl       $v23, $v21, $v24[2]
@@ -2073,6 +2084,7 @@ L_1D20:
     rsp.VMADH<9>(rsp.vpu.r[20], rsp.vpu.r[20], rsp.vpu.r[24]);
     // vmadn       $v21, $v31, $v0[0]
     rsp.VMADN<8>(rsp.vpu.r[21], rsp.vpu.r[31], rsp.vpu.r[0]);
+L_1DBC:
     // vmulf       $v16, $v18, $v24[6]
     rsp.VMULF<14>(rsp.vpu.r[16], rsp.vpu.r[18], rsp.vpu.r[24]);
     // addi        $14, $14, -0x10
@@ -2083,7 +2095,6 @@ L_1D20:
     r19 = RSP_ADD32(r19, 0X10);
     // vmulf       $v28, $v28, $v10[6]
     rsp.VMULF<14>(rsp.vpu.r[28], rsp.vpu.r[28], rsp.vpu.r[10]);
-L_1D50:
     // add         $17, $17, $15
     r17 = RSP_ADD32(r17, r15);
     // vmacf       $v28, $v17, $v16
@@ -2098,11 +2109,11 @@ L_1D50:
     rsp.SQV<0>(rsp.vpu.r[28], r18, 0X0);
     // addi        $18, $18, 0x10
     r18 = RSP_ADD32(r18, 0X10);
-    // blez        $14, L_1D7C
+    // blez        $14, L_1DFC
     if (RSP_SIGNED(r14) <= 0) {
         // sqv         $v26[0], 0x0($16)
         rsp.SQV<0>(rsp.vpu.r[26], r16, 0X0);
-        goto L_1D7C;
+        goto L_1DFC;
     }
     // sqv         $v26[0], 0x0($16)
     rsp.SQV<0>(rsp.vpu.r[26], r16, 0X0);
@@ -2112,7 +2123,7 @@ L_1D50:
     goto L_1D04;
     // add         $16, $16, $15
     r16 = RSP_ADD32(r16, r15);
-L_1D7C:
+L_1DFC:
     // sqv         $v18[0], 0x20($23)
     rsp.SQV<0>(rsp.vpu.r[18], r23, 0X2);
     // sqv         $v19[0], 0x30($23)
@@ -2120,20 +2131,20 @@ L_1D7C:
     // sqv         $v24[0], 0x40($23)
     rsp.SQV<0>(rsp.vpu.r[24], r23, 0X4);
     // jal         0x11B0
-    r31 = 0x1D90;
+    r31 = 0x1E10;
     // addi        $3, $zero, 0x4F
     r3 = RSP_ADD32(0, 0X4F);
     goto L_11B0;
     // addi        $3, $zero, 0x4F
     r3 = RSP_ADD32(0, 0X4F);
-L_1D90:
+L_1E10:
     // mfc0        $5, SP_DMA_BUSY
     r5 = 0;
-    // bne         $5, $zero, L_1D90
+    // bne         $5, $zero, L_1E10
     if (r5 != 0) {
         // nop
     
-        goto L_1D90;
+        goto L_1E10;
     }
     // nop
 
@@ -2141,15 +2152,16 @@ L_1D90:
     // mtc0        $zero, SP_SEMAPHORE
     goto L_1118;
     // mtc0        $zero, SP_SEMAPHORE
+L_1E24:
     // lqv         $v31[0], 0x0($zero)
     rsp.LQV<0>(rsp.vpu.r[31], 0, 0X0);
     // lhu         $18, 0x4($24)
     r18 = RSP_MEM_HU_LOAD(0X4, r24);
-    // beq         $18, $zero, L_1E14
+    // beq         $18, $zero, L_1E94
     if (r18 == 0) {
         // nop
     
-        goto L_1E14;
+        goto L_1E94;
     }
     // nop
 
@@ -2157,7 +2169,6 @@ L_1D90:
     r19 = r25 & 0XFFFF;
     // addi        $19, $19, 0x5C0
     r19 = RSP_ADD32(r19, 0X5C0);
-L_1DBC:
     // srl         $20, $25, 16
     r20 = S32(U32(r25) >> 16);
     // addi        $20, $20, 0x5C0
@@ -2174,7 +2185,7 @@ L_1DBC:
     rsp.LQV<0>(rsp.vpu.r[26], r19, 0X1);
     // lqv         $v28[0], 0x10($20)
     rsp.LQV<0>(rsp.vpu.r[28], r20, 0X1);
-L_1DDC:
+L_1E5C:
     // vmulf       $v27, $v27, $v31[6]
     rsp.VMULF<14>(rsp.vpu.r[27], rsp.vpu.r[27], rsp.vpu.r[31]);
     // addi        $18, $18, -0x20
@@ -2199,15 +2210,15 @@ L_1DDC:
     r19 = RSP_ADD32(r19, 0X20);
     // lqv         $v27[0], 0x0($19)
     rsp.LQV<0>(rsp.vpu.r[27], r19, 0X0);
-    // bgtz        $18, L_1DDC
+    // bgtz        $18, L_1E5C
     if (RSP_SIGNED(r18) > 0) {
         // lqv         $v26[0], 0x10($19)
         rsp.LQV<0>(rsp.vpu.r[26], r19, 0X1);
-        goto L_1DDC;
+        goto L_1E5C;
     }
     // lqv         $v26[0], 0x10($19)
     rsp.LQV<0>(rsp.vpu.r[26], r19, 0X1);
-L_1E14:
+L_1E94:
     // j           L_1118
     // nop
 
@@ -2219,20 +2230,36 @@ L_1E14:
     return RspExitReason::ImemOverrun;
 do_indirect_jump:
     switch ((jump_target | 0x1000) & 0X1FFF) { 
-        case 0x1040: goto L_1040;
-        case 0x10B0: goto L_10B0;
-        case 0x1AA4: goto L_1AA4;
-        case 0x1B0C: goto L_1B0C;
-        case 0x10F8: goto L_10F8;
-        case 0x1710: goto L_1710;
-        case 0x11C0: goto L_11C0;
-        case 0x1200: goto L_1200;
-        case 0x1848: goto L_1848;
-        case 0x1678: goto L_1678;
-        case 0x1D90: goto L_1D90;
-        case 0x123C: goto L_123C;
-        case 0x147C: goto L_147C;
-        case 0x17E8: goto L_17E8;
+        case 0x144C: goto L_144C;
+        case 0x1868: goto L_1868;
+        case 0x170C: goto L_170C;
+        case 0x14FC: goto L_14FC;
+        case 0x12BC: goto L_12BC;
+        case 0x16F8: goto L_16F8;
+        case 0x1280: goto L_1280;
+        case 0x1240: goto L_1240;
+        case 0x1328: goto L_1328;
+        case 0x1294: goto L_1294;
+        case 0x1178: goto L_1178;
+        case 0x1B24: goto L_1B24;
+        case 0x1E10: goto L_1E10;
+        case 0x1214: goto L_1214;
+        case 0x1130: goto L_1130;
+        case 0x1118: goto L_1118;
+        case 0x10C0: goto L_10C0;
+        case 0x1470: goto L_1470;
+        case 0x11DC: goto L_11DC;
+        case 0x1790: goto L_1790;
+        case 0x187C: goto L_187C;
+        case 0x18C8: goto L_18C8;
+        case 0x1B8C: goto L_1B8C;
+        case 0x1254: goto L_1254;
+        case 0x12D0: goto L_12D0;
+        case 0x1E24: goto L_1E24;
+        case 0x1B38: goto L_1B38;
+        case 0x12EC: goto L_12EC;
+        case 0x140C: goto L_140C;
+        case 0x138C: goto L_138C;
     }
     printf("Unhandled jump target 0x%04X in microcode rayman2_rsp_audio, coming from [%s:%d]\n", jump_target, debug_file, debug_line);
     printf("Register dump: r0  = %08X r1  = %08X r2  = %08X r3  = %08X r4  = %08X r5  = %08X r6  = %08X r7  = %08X\n"

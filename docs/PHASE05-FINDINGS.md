@@ -38,49 +38,93 @@ and is really a wrong length. Anything that recompiles a fixed extent out of a
 ROM has this failure mode: the error names the first thing it could not parse,
 not the reason it was parsing there.
 
-## Where the audio stands
+## Audio works
 
 `scripts/recompile-rsp.sh` runs RSPRecomp from `recomp/rsp_audio.us.toml` and
-produces `RecompiledRsp/rsp_audio.cpp` -- 2245 lines, entry point
-`rayman2_rsp_audio`, matching librecomp's `RspUcodeFunc` signature exactly. It
-compiles and links, and `src/rsp.cpp` dispatches it on the microcode *address*
+produces `RecompiledRsp/rsp_audio.cpp`, whose entry point matches librecomp's
+`RspUcodeFunc` signature. `src/rsp.cpp` dispatches it on the microcode *address*
 rather than the task type, because the type says what the game means and the
 address says which code is about to run.
 
-Two build details were needed. The generated file is C++ -- it includes
-librecomp's rsp headers and uses attributes and value initialisation -- so it is
-named `.cpp`; naming it `.c` and letting CMake infer the language does not work.
-And it needs `-msse4.1`, because librecomp implements the RSP's vector unit with
-x86 intrinsics and several of them reach for `_mm_blendv_epi8`, which is an
-`always_inline` and so fails the build rather than falling back. That flag is set
-on the one translation unit, not the executable: every other object here is
-either generated MIPS-to-C, which gains nothing, or host code where raising the
-instruction-set floor would be a portability decision made by accident.
+Three things had to be right, and the first two were wrong in ways that looked
+like something else.
 
-**It runs, and it does not yet work.** It stops with `UnhandledJumpTarget` on an
-indirect jump at the top of the command loop. What is established:
+### The microcode is not loaded at the start of IMEM
 
-  * The dispatch reads a command word from DMEM 0x380 and takes the index from
-    bits 30..24, doubled: `r1 = (word >> 23) & 0xFE`.
-  * At the failure that word is `0x109C156C`, so the index is 0x20 -- entry 16
-    of a table that has sixteen entries, at ucode_data +0x10..+0x2F. One past
-    the end, and the halfword it reads instead is 0xF000, which sign-extends to
-    the 0xFFFFF000 the jump reports.
-  * That word is what `ucode_data` itself contains at +0x380. librecomp's
-    `run_task` seeds DMEM by copying the OSTask to 0xFC0 and DMA-ing
-    `ucode_data` to 0x0000, so DMEM 0x380 holds microcode data, not a command
-    list. The microcode is dispatching on its own constants because the audio
-    command list has not been brought in yet.
+This was the whole of the first failure, and it was settled by disassembling the
+0xD0-byte boot stub rather than by reasoning about the microcode. rspboot is
+itself loaded at IMEM 0x1000 and does:
 
-So the question for the next round is what should have loaded the command list
-into DMEM before the loop reads it, and whether the entry point or the initial
-register state differs from what the real boot stub leaves behind. The table at
-ucode_data +0x10 is not a command table -- its first entry, 0x1118, is the
-microcode's own DMA-read helper -- so it is a table of routines, which is worth
-knowing before reading the dispatch again.
+    0x1008  lw   $v0, 0x10($at)        ; task.ucode      ($at = 0xFC0)
+    0x100C  addi $v1, $zero, 0xF7F     ; length - 1
+    0x1010  addi $a3, $zero, 0x1080    ; IMEM destination
+    0x1014  mtc0 $a3, SP_MEM_ADDR
+    0x1018  mtc0 $v0, SP_DRAM_ADDR
+    0x101C  mtc0 $v1, SP_RD_LEN
+    0x1034  jr   $a3                   ; and enter it there
 
-Until that is settled the recompiled microcode is **opt-in**, behind
-`RAYMAN2_RSP_AUDIO=1`. librecomp treats any exit other than `Broke` as a failed
-task and ends the program, so dispatching it by default would trade a port that
-runs at sixty frames a second without sound for one that dies after two seconds.
-The default remains the silent stub.
+So the microcode is loaded at **0x04001080** and entered there, leaving the
+first 0x80 bytes of IMEM to the boot stub. Recompiled as though it began at
+0x04001000, every label sat 0x80 bytes away from the address the jumps actually
+use. The symptoms were thoroughly misleading: the first `jal` landed inside a
+DMA helper, and the command loop then read what looked like an audio command out
+of DMEM and dispatched on it, producing an indirect jump to 0xFFFFF000. Reading
+that back it was tempting to conclude the command list had never been DMA'd --
+a plausible story about a real mechanism, and entirely wrong. The addresses were
+simply shifted.
+
+### The dispatch table is data, so no static scan can find it
+
+With the load address fixed the jump target became 0x12D0 -- a real address
+inside the microcode, which is what a correct-control-flow failure looks like.
+The microcode reads a command word from DMEM, takes the index from bits 30..24
+doubled, and `jr`s through a table of sixteen halfwords at `ucode_data + 0x10`.
+Those are data, so RSPRecomp cannot reach them by following branches; they are
+listed in the config as `extra_indirect_branch_targets`. All sixteen land inside
+the microcode's IMEM range of 0x1080..0x1EA0, which is the check that they are
+really code addresses and not a misread of the data.
+
+### The two audio callbacks use different units
+
+With the microcode running, sound came out but the output queue grew by about
+sixteen thousand frames a second, so the audio drifted steadily behind the
+picture. The cause is an asymmetry in ultramodern's audio callbacks that is easy
+to miss:
+
+  * `queue_samples(int16_t*, size_t count)` receives `byte_count / sizeof(int16_t)`
+    -- a count of **int16 values**, counting each channel separately.
+  * `get_frames_remaining()` is multiplied by `2 * sizeof(int16_t)` on the way
+    back, so that one is **frames**.
+
+The port multiplied the first by bytes-per-frame, queueing twice as many bytes
+as the game produced and reading past the end of the buffer. Corrected, the
+production rate matches the device exactly.
+
+### Result
+
+The game requests 48000 Hz at start-up and then 22050 Hz. Measured over
+twenty-five seconds at 22050:
+
+    audio 22400 frames/s  peak 13264  queued 32
+    audio 22400 frames/s  peak 15096  queued 928
+    audio 22240 frames/s  peak 12902  queued 736
+    audio 22080 frames/s  peak 16552  queued 416
+
+Production matches the device rate, the queue stays within a thousand frames --
+a few tens of milliseconds of latency, not growing -- and the peak moves with
+the content rather than sitting at zero or clipping. Forty-five seconds with
+audio enabled: 2152 display lists at a sustained 60 a second, no failed tasks,
+no unhandled jumps, and the intro cinematic still rendering correctly.
+
+`RAYMAN2_AUDIOPROBE=1` reports that rate/peak/queue line once a second. It is
+worth keeping: "samples are being queued" and "there is sound" are different
+claims, and a microcode that runs to completion writing silence produces exactly
+the same frame count as one that works.
+
+## Still to do for the gate
+
+The gate is the first three levels playing start to finish with correct visuals,
+audio and Controller Pak saves. Remaining: the fog and transparent water that
+phase 00 flagged as the usual casualties under an HLE renderer, F3DEX 1.x
+command-level behaviour, and the Controller Pak path, which currently reports no
+pak at all.

@@ -43,24 +43,6 @@ namespace {
 // recomp/rsp_audio.us.toml into RecompiledRsp/rsp_audio.cpp.
 RspExitReason rayman2_rsp_audio(uint8_t* rdram, uint32_t ucode_addr);
 
-namespace {
-    // Opt-in, because the recompiled microcode does not run correctly yet.
-    //
-    // It is generated, compiled and linked, and it executes -- but it stops
-    // with UnhandledJumpTarget on an indirect jump whose destination reads as
-    // 0xFFFFF000, which is not an address. When librecomp gets anything other
-    // than Broke back it treats the task as failed and ends the program, so
-    // dispatching it by default would trade a port that runs at sixty frames a
-    // second with no sound for one that dies after two seconds.
-    //
-    // Set RAYMAN2_RSP_AUDIO=1 to dispatch it and continue the bring-up. What is
-    // known so far is in docs/PHASE05-FINDINGS.md.
-    bool audio_ucode_enabled() {
-        static const bool on = std::getenv("RAYMAN2_RSP_AUDIO") != nullptr;
-        return on;
-    }
-}
-
 RspUcodeFunc* rayman2_get_rsp_microcode(const OSTask* task) {
     if (task == nullptr) {
         return silent_task_stub;
@@ -74,7 +56,7 @@ RspUcodeFunc* rayman2_get_rsp_microcode(const OSTask* task) {
     // logging every distinct one across a run found a single entry -- and it
     // sits at 0x80017E60, immediately after the boot stub the two microcodes
     // share and immediately before F3DEX at 0x80018C80.
-    if (task->t.ucode == kAudioUcodeAddress && audio_ucode_enabled()) {
+    if (task->t.ucode == kAudioUcodeAddress) {
         return rayman2_rsp_audio;
     }
 
