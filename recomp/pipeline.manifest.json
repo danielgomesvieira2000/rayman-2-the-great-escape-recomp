@@ -2,7 +2,7 @@
   "inputs": {
     "rom.z64": "e9a71380b43e25b9",
     "recomp/rayman2.us.yaml": "7b07d8a273e15858",
-    "recomp/rayman2.us.toml": "feff41f73d53aa51",
+    "recomp/rayman2.us.toml": "0bb882999cb62834",
     "recomp/symbol_addrs.txt": "41bd9096e0b4bcd5",
     "recomp/macro.inc": "5e4a2b83a686891b"
   },

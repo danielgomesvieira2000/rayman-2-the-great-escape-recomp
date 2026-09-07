@@ -67,10 +67,20 @@ stubs = [
 # scripts/recompile.sh -- do not edit the list by hand.
 # @IGNORED@
 
-# Single-instruction patches to the target binary, e.g. neutralising a
-# hardware write:
+# Single-instruction patches to the target binary.
 #
-# [[patches.instruction]]
-# func  = "SomeFunc"
-# vram  = 0x80001234
-# value = 0x00000000   # -> nop
+# None are applied. One was, as a diagnostic, and it has been removed now that
+# it answered its question -- see docs/PHASE04-FINDINGS.md for the result.
+#
+# To repeat that experiment (NOP the game's shared assert trap, silencing all
+# ten of its call sites at once):
+#
+#   [[patches.instruction]]
+#   func  = "func_8008F86C"
+#   vram  = 0x8008F86C
+#   value = 0x00000000   # break 255 -> nop
+#
+# It is deliberately NOT left in place. With the trap disabled the game runs on
+# through data it has itself declared invalid, so anything observed afterwards
+# may be an artefact of that corrupted state rather than a real finding. A
+# diagnostic that quietly becomes permanent is worse than no diagnostic.

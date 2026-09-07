@@ -366,6 +366,63 @@ crash reporter that served so well for access violations cannot help here.
 The first is worth doing before the second, because if boot continues past the
 assert then the invariant is advisory and the search moves elsewhere entirely.
 
+## The instruction-patch experiment, and its answer
+
+The question was whether the assertion is load-bearing. `[[patches.instruction]]`
+answered it for two rebuilds and no new tooling.
+
+**Attempt one NOPed the `jal` at the failing call site, and the break fired
+anyway.** `func_8008F86C` turns out to be a *shared* assert routine with **ten**
+callers, so silencing one site just moves to the next. Useful in itself: the
+game asserts in ten places during boot, not one.
+
+**Attempt two NOPed the `break 255` instruction inside the routine**, which
+disables all ten at once -- the function becomes `nop / jr $ra / nop`. That is
+the patch worth recording, because it converts "does this one check matter" into
+"do any of the game's assertions matter":
+
+| | Before | Assertions disabled |
+|---|---|---|
+| Breaks reported | 1 | **0** |
+| Process lifetime | ~2 s, then exits | **indefinite** (20 s+, still going) |
+| VI frames | stops at ~123 | **climbs steadily at 60/s past 1,090** |
+| Display lists | 0 | **0** |
+| Dummy workloads | 10 | 10, and not increasing |
+
+So the answer is a clear **no, and it does not help**. Execution continues
+happily past every assertion the game makes -- nothing downstream depends on
+that invariant enough to fail immediately -- but the game still never submits a
+display list. Bypassing the assert bought a process that stays alive without
+drawing.
+
+That is worth knowing precisely because it is negative. **The assertion is a
+symptom, not the blocker.** Whatever stops this game reaching its render path is
+upstream of the assert and independent of it, so effort spent on that one check
+would have been wasted. The list data really is wrong -- the game says so, and
+it is right -- but fixing the check would not have produced a frame.
+
+**The patch was removed rather than kept.** With the trap disabled the game runs
+on through data it has itself declared invalid, and anything observed in that
+state may be an artefact rather than a finding. The exact stanza is recorded in
+`recomp/rayman2.us.toml` so the experiment is one paste away, but the default
+build stays honest. A diagnostic that quietly becomes permanent is worse than no
+diagnostic.
+
+**Where this leaves the search.** Two independent problems are now visible where
+there appeared to be one:
+
+1. Something fills those list nodes with a value that will not fit a byte. The
+   game detects this itself. Finding the cause wants a `RECOMP_HOOK` printing
+   the node address and field -- the phase 06 MIPS toolchain.
+2. Something stops the game reaching the render path *at all*, and it is not
+   the assertion. This is the one that blocks the phase 04 gate, and the
+   counters say the game thread is alive while producing no graphics tasks.
+
+The second is the one to chase first, and it needs a different instrument again:
+where the game thread actually is while the VI ticks. A periodic sample of the
+game thread's call site would say whether it is looping, blocked on a queue that
+never fills, or quietly finished.
+
 ## Still outstanding
 
 - **Nineteen functions in the boot segment poke hardware registers** (a scan for
