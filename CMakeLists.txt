@@ -160,6 +160,7 @@ set(PORT_SOURCES
     src/rsp.cpp
     src/port_runtime.cpp
     src/register_sections.cpp
+    src/spin_yield.cpp
     src/crash_report.cpp
     src/thread_sampler.cpp
     src/debug_node.cpp)

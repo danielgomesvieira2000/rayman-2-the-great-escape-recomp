@@ -864,3 +864,70 @@ to look next.
 
 The port still submits no graphics task. Nothing crashes, nothing hangs in the
 runtime, and the game is now stopped on a screen it means to be stopped on.
+
+## The scheduler has no preemption, and the game assumes it does
+
+### First, a correction
+
+The previous section concluded that the descriptor at `D_800CF664[0]` was
+uninitialised, on the evidence that its supported-button mask at offset 4 read
+zero. **That was a measurement artefact.** func_800A3BB0 writes that field with
+`sw`, so it is a *word* holding a zero-extended halfword -- 0x00009000 -- and
+the probe read it with `MEM_HU`, which returns the upper half of a big-endian
+word and is therefore always zero. Read as a word it holds 0x9000, exactly the
+buttons being pressed.
+
+With that corrected, and the auto-press pulsing rather than holding,
+func_800A3878 returns 0x7FFE and the wait at func_800A1190 completes **with no
+instruction patch at all**. The game dismisses its own Controller Pak prompt on
+a button press, as it should. The binding layer was never broken; two successive
+readings of it were.
+
+The lesson is narrow and worth keeping: when a probe reports zero, check the
+width of the field before concluding anything about the program. A halfword read
+of a word field is not a null result, it is the wrong question.
+
+### The actual defect
+
+Past the prompt, func_800FA95C runs to its last call, func_8008F344, which is
+the tail of the game's graphics initialisation:
+
+    func_8008EF6C();
+    while (func_8008EF6C() != 0) { }      // reads one byte, calls nothing
+    func_8008F314();
+
+The byte is cleared by a worker thread at func_8008EF78, which sits in
+`osRecvMesg` on queue `D_800CF0C0`. Measured over fourteen seconds, the spin
+turned **519 million times** while the worker ran **21 times** and then stopped
+for good.
+
+That is a deadlock, and it is structural rather than particular to this game.
+libultra's scheduler is preemptive: a counter interrupt fires no matter what the
+running thread is doing, so code is entitled to spin on a flag and expect
+somebody else to clear it. ultramodern's is not. `check_running_queue` is called
+from exactly three places -- `osSendMesg`, `osRecvMesg` and `osJamMesg` -- and
+`dequeue_external_messages`, which is the only thing that delivers VI retrace,
+SP and DP completion, PI and SI, is called from the same three. A game thread
+that spins without calling any of them stops the entire game: no other thread
+runs and no external event is ever delivered.
+
+The fix is `src/spin_yield.cpp`, injected into the loop body by a hook. It does
+what the counter interrupt would have done -- deliver a pending external message
+and hand the CPU to a higher-priority runnable thread. The wait is bounded to a
+millisecond rather than indefinite: VI retrace alone would supply a message
+every frame, but a spin that turns into a hard block if that supply ever stops
+trades a visible busy-wait for an invisible hang, and the bound costs nothing.
+
+With it, the worker runs continuously instead of stopping at 21, the spin exits,
+func_800FA95C returns, and func_800292F4 gets past the initialisation call it
+had been stuck on since this phase began.
+
+This is the first defect found in this port that is a property of the runtime's
+execution model rather than of a symbol left unnamed, and it will not be the
+last: any other busy-wait in this game will fail the same way and need the same
+treatment. A general fix -- pumping external messages from outside the game
+threads -- would be better than a hook per loop, and is worth considering if a
+third one turns up.
+
+The port still submits no display list. Nothing crashes, nothing hangs, and the
+game is now further into its own initialisation than at any previous point.

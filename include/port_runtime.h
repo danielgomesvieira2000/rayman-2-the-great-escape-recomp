@@ -64,6 +64,12 @@ void rayman2_debug_count(uint8_t* rdram, uint32_t site);
 void rayman2_debug_struct(uint8_t* rdram, uint32_t addr, uint32_t words);
 void rayman2_debug_text(uint8_t* rdram, uint32_t addr);
 
+/* Defined in src/spin_yield.cpp. Injected into game spin loops that wait on a
+   flag another thread must clear: ultramodern only reschedules and only
+   delivers external events inside message-queue calls, so a spin that makes
+   none of those deadlocks the whole game. See that file. */
+void rayman2_yield_in_spin(uint8_t* rdram);
+
 // Defined in src/register_sections.cpp; called from a hook on the boot thread
 // so that it runs after librecomp's init() has cleared and repopulated the
 // function map. See that file for why the runtime's own pass gets two of the

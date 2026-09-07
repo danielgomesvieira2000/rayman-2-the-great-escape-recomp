@@ -127,3 +127,15 @@ stubs = [
 func = "func_80000854"
 at_func_start = true
 text = "rayman2_register_static_sections();"
+
+# Give the scheduler a turn inside the graphics init's busy-wait.
+#
+# func_8008F344 spins on a byte that only the worker thread at func_8008EF78
+# clears, and that worker is blocked in osRecvMesg. ultramodern reschedules and
+# delivers external events only inside message-queue calls, and this loop makes
+# none -- measured, it turned 519 million times in fourteen seconds while the
+# worker ran 21 times and stopped. See src/spin_yield.cpp.
+[[patches.hook]]
+func = "func_8008F344"
+before_vram = 0x8008F354
+text = "rayman2_yield_in_spin(rdram);"
