@@ -36,6 +36,17 @@ Two deliberate choices about what to exclude:
     another thread is almost always a handful of instructions; a long one is
     usually doing work.
 
+  * THE TEST THAT MAKES THIS USABLE: the exit condition must not depend on
+    anything the loop itself advances. Without it the scan reports 362
+    candidates of which about six are real -- every linked-list walk and every
+    bounded clear qualifies, because they read a global and never write it.
+    A traversal computes its branch from a register it carries across the back
+    edge (`lw $s0, 0x14($s0)`); a counted loop does the same through `addiu`.
+    A genuine wait does not: it recomputes a fixed address from lui/%lo, or
+    tests the result of a call, and so has nothing loop-carried in the chain
+    the branch depends on. Checking that turns the list from noise into six
+    entries, all real.
+
 This reports candidates, not verdicts: whether a candidate actually deadlocks
 depends on who clears the flag and whether they ever get to run, which only
 running the program can settle.
@@ -48,12 +59,16 @@ import pathlib
 import re
 import sys
 
+REG = re.compile(r"\$([a-z0-9]+)")
+STORE_MNEM = re.compile(r"^s[bhwd]$|^swl$|^swr$|^sc$|^sdc1$|^swc1$")
+BRANCH_MNEM = re.compile(r"^(b\w*|j|jr|jal|jalr)$")
+
 INSN = re.compile(r"/\*\s+[0-9A-Fa-f]+\s+([0-9A-Fa-f]{8})\s+[0-9A-Fa-f]{8}\s+\*/\s+(\S+)\s*(.*)")
 GLABEL = re.compile(r"^glabel (\S+)")
 LABEL = re.compile(r"^\s*\.(L[0-9A-Fa-f]+):")
 BRANCH = re.compile(r"^(b\w*|j)$")
 LOAD = re.compile(r"^l[bhwd]u?$|^lwl$|^lwr$|^ll$")
-STORE = re.compile(r"^s[bhwd]$|^swl$|^swr$|^sc$")
+STORE = re.compile(r"^s[bhwd]$|^swl$|^swr$|^sc$|^swc1$|^sdc1$|^swc2$")
 LO_REF = re.compile(r"%lo\(([A-Za-z_][A-Za-z0-9_]*)\)")
 TARGET = re.compile(r"\.(L[0-9A-Fa-f]+)\s*$")
 # A loop may also branch to the function's own entry label rather than to a
@@ -67,6 +82,80 @@ JAL_TARGET = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*$")
 # The three routines that call check_running_queue and drain the external
 # message queue. Reaching any of them is what makes a loop safe.
 YIELD_POINTS = {"osSendMesg", "osRecvMesg", "osJamMesg", "osYieldThread", "osStopThread"}
+
+
+def def_use(mnem, ops):
+    """(defined register, [used registers]) for one instruction.
+
+    Deliberately approximate. Stores and branches define nothing; a call is
+    treated as defining the return registers, which is what lets a loop whose
+    branch tests a callee's result come out clean. Everything else defines its
+    first register operand, which is true of the arithmetic, logic, load and
+    lui forms that appear in these loops.
+    """
+    regs = REG.findall(ops)
+    if mnem in ("jal", "jalr"):
+        return "v0", regs
+    if STORE_MNEM.match(mnem) or BRANCH_MNEM.match(mnem) or mnem == "nop":
+        return None, regs
+    if not regs:
+        return None, []
+    return regs[0], regs[1:]
+
+
+def loop_makes_progress(span):
+    """True if the loop's exit condition depends on something it advances.
+
+    Two steps. First find the loop-carried registers: those read within the
+    body before anything in the body writes them, and written somewhere in it
+    -- their value at the top of an iteration came from the previous one.
+    Then walk the branch's tested registers backwards through the body to the
+    registers they depend on. If the two sets meet, the loop is making its own
+    progress and is a traversal or a count, not a wait.
+    """
+    written = set()
+    loop_carried = set()
+    for _, mnem, ops in span:
+        d, uses = def_use(mnem, ops)
+        for u in uses:
+            if u not in written and u != "zero":
+                loop_carried.add(u)
+        if d:
+            written.add(d)
+    loop_carried &= written
+
+    # The terminating branch is the last real instruction before the delay slot.
+    branch = None
+    for entry in reversed(span):
+        if BRANCH_MNEM.match(entry[1]):
+            branch = entry
+            break
+    if branch is None:
+        return True
+    _, uses = def_use(branch[1], branch[2])
+    deps = {u for u in uses if u != "zero"}
+    if not deps:
+        # Nothing to analyse: an unconditional `j` back edge whose real test is
+        # a forward branch elsewhere, or a floating-point condition branch,
+        # which carries its predicate in a condition flag rather than a
+        # register. Both shapes are overwhelmingly counted loops here, so say
+        # "makes progress" rather than emit a candidate nothing can judge.
+        return True
+
+    # Walk backwards, adding what each definition of a dependency depends on.
+    for _ in range(len(span)):
+        grew = False
+        for _, mnem, ops in span:
+            d, uses2 = def_use(mnem, ops)
+            if d in deps:
+                for u in uses2:
+                    if u != "zero" and u not in deps:
+                        deps.add(u)
+                        grew = True
+        if not grew:
+            break
+
+    return bool(deps & loop_carried)
 
 
 def parse(path):
@@ -198,6 +287,8 @@ def main():
                 stores |= writes.get(c, set())
             waited = loads - stores
             if not waited:
+                continue
+            if not args.all and loop_makes_progress(span):
                 continue
             rows.append((len(span), func, body[start][0], vram, sorted(waited),
                          sorted(callees), can_yield))

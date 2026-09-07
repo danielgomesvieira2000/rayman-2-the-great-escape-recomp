@@ -570,3 +570,22 @@ osContGetQuery = 0x800087D0; // type:func
 // in the reimplemented set, so librecomp answers it from the state that is
 // actually true.
 osViGetCurrentFramebuffer = 0x80007CD0; // type:func
+
+// osSpTaskYield and osSpTaskYielded -- the last raw MMIO on the graphics path.
+//
+// With the frame loop running the port got about seven seconds in and then
+// faulted writing 0xA4040010, SP_STATUS. The chain was the task thread ->
+// func_80007C60 -> func_80011340, and func_80007C60 is three instructions:
+// __osSpSetStatus(0x400). SP_SET_SIG0 is what libultra's osSpTaskYield writes
+// to ask the running microcode to stop, so that is what this is.
+//
+// Its neighbour func_80007C80 is the other half: it reads SP_STATUS, tests bit
+// 0x80 -- the yielded flag -- folds bit 8 into the caller's OSTask flags and
+// clears it. That is osSpTaskYielded, and it is reached from the same state
+// machine, so naming one without the other would just move the fault.
+//
+// Both are in the reimplemented set and librecomp implements both, which it has
+// to: whether a task yielded is a question about ultramodern's own task thread,
+// not about a register this port does not have.
+osSpTaskYield   = 0x80007C60; // type:func
+osSpTaskYielded = 0x80007C80; // type:func

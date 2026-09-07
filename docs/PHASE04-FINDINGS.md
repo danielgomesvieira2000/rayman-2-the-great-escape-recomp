@@ -1132,3 +1132,68 @@ than needing to be hunted: `find_spin_loops.py` ranks func_800393CC and
 func_8003941C (a mutually recursive pair on D_800CC620/D_800CC628),
 func_80090D00, func_800AA9AC and func_800AA9F8 above everything else. Each is
 five instructions, waits on a global it never writes, and cannot reach a yield.
+
+## Sixty frames a second
+
+The port now renders continuously. Over a forty-second run: **1844 display
+lists at a sustained 59-61 per second**, no crash, no hang. After about six
+seconds of loading it locks to sixty and stays there.
+
+Two things got it there.
+
+### The spin-loop tool, made precise
+
+The ranked list was 362 candidates of which about six were real, which is not a
+list anybody can act on -- and acting on it blindly would have been worse than
+useless. Every one of the top entries after the three already fixed turned out
+to be a false positive: two linked-list walkers, a tree walker, a bounded
+three-element copy, a float subtraction loop, and a clear of 0x25800 words.
+Injecting a one-millisecond yield into that last one would have taken minutes
+per call.
+
+What separates a wait from a traversal is not what it reads but whether its exit
+condition depends on something it advances. A traversal computes its branch from
+a register carried across the back edge (`lw $s0, 0x14($s0)`); a counted loop
+does the same through `addiu`. A genuine wait recomputes a fixed address from
+lui/%lo, or tests the result of a call, and so has nothing loop-carried in the
+chain its branch depends on.
+
+`tools/find_spin_loops.py` now computes that: the loop-carried registers (read
+before written within the body) and the backward dependency closure of the
+branch's tested registers, and rejects the loop if they intersect. Two smaller
+fixes came with it -- `swc1`/`sdc1` were missing from the store set, so a loop
+that wrote its own float flag looked like a wait; and a loop whose back edge is
+an unconditional `j`, or whose branch is a floating-point condition, yields no
+register dependencies at all, so there is nothing to judge and it is skipped
+rather than reported.
+
+The list went 362 -> 86 -> **38**, and the top of it is now exactly the real
+cases: the three already fixed, four entries in libultra routines that librecomp
+replaces anyway, and main's two-second osGetTime wait -- which does terminate,
+but held up every external event while it ran, and is now pumped too.
+
+### osSpTaskYield and osSpTaskYielded
+
+With the frame loop running, the port got about seven seconds in and faulted
+writing 0xA4040010, SP_STATUS. func_80007C60 is three instructions,
+`__osSpSetStatus(0x400)`, and SP_SET_SIG0 is what osSpTaskYield writes to ask
+the running microcode to stop. Its neighbour func_80007C80 reads SP_STATUS,
+tests the yielded bit, folds it into the caller's OSTask flags and clears it --
+osSpTaskYielded. Both are reimplemented by librecomp, which they must be:
+whether a task yielded is a question about ultramodern's task thread, not about
+a register this port does not have.
+
+Naming them took the port from seven seconds and a crash to forty seconds at a
+locked sixty.
+
+### What remains
+
+Without a button press the game sits at its Controller Pak prompt and renders
+nothing at all, so a player would see a black screen with no indication that
+anything is wanted. The prompt's wait runs before its draw, which is consistent
+with what the earlier trace showed, but "correct and invisible" is not good
+enough and it is the next thing to look at.
+
+The remaining diagnostic scaffolding is gone. Seven hooks are active and every
+one is load-bearing: the section registration, four spin pumps, and main's time
+wait. No instruction patches.

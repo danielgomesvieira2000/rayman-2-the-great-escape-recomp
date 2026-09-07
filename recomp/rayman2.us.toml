@@ -204,3 +204,15 @@ func = "func_8008FAF8"
 before_vram = 0x8008FAF8
 text = "rayman2_yield_in_spin(rdram);"
 
+# The two-second wait at the top of the game's main.
+#
+# main spins on osGetTime until roughly two seconds of OSTime have passed. It
+# does terminate -- the clock advances on its own -- so this is not a deadlock,
+# but while it runs nothing drains the external queue, so VI retrace, audio and
+# DMA completion are all held up for as long as it lasts. A yield costs nothing
+# in a loop that is waiting for wall-clock time by definition.
+[[patches.hook]]
+func = "func_80025D30"
+before_vram = 0x80025E14
+text = "rayman2_yield_in_spin(rdram);"
+
