@@ -423,6 +423,70 @@ where the game thread actually is while the VI ticks. A periodic sample of the
 game thread's call site would say whether it is looping, blocked on a queue that
 never fills, or quietly finished.
 
+## The thread sampler, and a correction it forced
+
+`src/thread_sampler.cpp` samples every thread periodically and reports two
+things: instruction pointers that landed in our own module ("executing"), and
+addresses found on the stacks of threads parked in a system wait, where the Rip
+is inside ntdll and only the return address further up is informative. It is
+opt-in behind `RAYMAN2_SAMPLE`, because suspending every thread is intrusive.
+
+It suspends, reads the context, copies a bounded stack window, and resumes,
+touching no lock in between -- doing anything else while a thread is suspended
+risks deadlocking on whatever lock that thread was holding.
+
+**Run in the default build it says almost nothing**, and for an instructive
+reason: with assertions live the game dies after about two seconds, so the
+cumulative totals are swamped by the idle period afterwards. One sample in 560
+landed in our code, everything else in `moodycamel::Semaphore::wait` -- which is
+ultramodern's worker threads idling with the game thread already gone.
+
+**Run with the assert bypass, the picture is completely different:**
+
+```
+224 rounds, 192 executing our code, 9737 parked in system waits
+executing:
+     116  rayman2-recomp.exe+0x214740   -> func_8008F86C
+      43  rayman2-recomp.exe+0x1867b    -> func_800004C0  funcs_48.c:6182
+      17  rayman2-recomp.exe+0x1868a    -> func_800004C0  funcs_48.c:6184
+       4  ... +0x18670 / +0x18683 / +0x1868e -> func_800004C0
+```
+
+`func_8008F86C` is **the assert routine**. With its `break` NOPed it became
+`nop / jr $ra / nop`, and the game is calling it constantly. The rest of the
+samples cluster in six addresses spanning about thirty bytes inside
+`func_800004C0`, the entry of the thread `main` created: a tight loop.
+
+### The correction
+
+The bypass experiment concluded that "execution continues past every assertion"
+and that the assertion was therefore "a symptom, not the blocker". **That
+reading was too generous, and the sampler disproves it.** The game does not
+proceed past the assert and get stuck somewhere else. It enters a loop that
+re-runs the failing operation and re-asserts, indefinitely.
+
+The distinction matters because it changes what to work on. "Not the blocker"
+pointed the search away from the list data; "loops forever re-asserting" points
+it straight back. The bad value in that node really is what stops this game
+booting, and the earlier conclusion would have sent the next session hunting a
+second, non-existent problem.
+
+Worth noting how the mistake was possible: with assertions disabled the process
+stays alive and the VI keeps ticking at 60 Hz, which *looks* exactly like a game
+running normally without drawing. Uptime and frame counters cannot tell a
+running game from a spinning one. Only sampling where the code actually is could.
+
+### What this settles
+
+- The game thread is **spinning**, not blocked and not finished.
+- It spins in `func_800004C0`, the thread `main` created, re-attempting the
+  operation that fails its own invariant.
+- The invariant failure is on the critical path to booting.
+- So the right next investment is the one deferred earlier: a `RECOMP_HOOK` on
+  `func_80088B5C` printing the node address and the field at `0xC`, to find what
+  fills it. That needs the phase 06 MIPS toolchain (LLVM 18.1.8), and it is now
+  clearly worth setting up rather than a maybe.
+
 ## Still outstanding
 
 - **Nineteen functions in the boot segment poke hardware registers** (a scan for

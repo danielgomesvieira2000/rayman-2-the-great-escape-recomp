@@ -70,6 +70,11 @@ void rayman2_register_sections();
 // src/crash_report.cpp -- prints a located fault instead of exiting silently.
 void rayman2_install_crash_reporter();
 
+// src/thread_sampler.cpp -- opt-in (RAYMAN2_SAMPLE) profile of where the
+// game's threads actually are, for when nothing crashes and nothing draws.
+void rayman2_start_thread_sampler();
+void rayman2_stop_thread_sampler();
+
 // src/rt64_context.cpp -- set true once the renderer has presented a frame.
 namespace rayman2 { std::atomic<bool>& vi_has_ticked(); }
 
@@ -514,6 +519,8 @@ int main(int argc, char** argv) {
     // during that bring-up. Anything thrown in there crosses a noexcept
     // boundary on its way out and the process fail-fasts with no message, so
     // the exception is caught and reported here instead of being guessed at.
+    rayman2_start_thread_sampler();
+
     std::fprintf(stderr, "[rayman2] entering recomp::start\n");
     try {
         recomp::start(config);   // blocks until the game exits
@@ -526,6 +533,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "[rayman2] FATAL: unknown exception\n");
         return EXIT_FAILURE;
     }
+    rayman2_stop_thread_sampler();
     std::fprintf(stderr, "[rayman2] recomp::start returned\n");
 
 #ifdef _WIN32
