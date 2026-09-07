@@ -139,3 +139,15 @@ text = "rayman2_register_static_sections();"
 func = "func_8008F344"
 before_vram = 0x8008F354
 text = "rayman2_yield_in_spin(rdram);"
+
+# The same busy-wait, in the other place it appears.
+#
+# tools/find_spin_loops.py ranks call-free waits by length, and the two shortest
+# in the whole game are this and func_8008F344 above -- four instructions each,
+# both spinning on D_800C8D10 through the same leaf. This one has not been
+# reached yet; it is patched now because it is the identical defect and finding
+# it again the hard way would be a waste.
+[[patches.hook]]
+func = "func_800FADC8"
+before_vram = 0x800FB018
+text = "rayman2_yield_in_spin(rdram);"

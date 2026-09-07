@@ -931,3 +931,68 @@ third one turns up.
 
 The port still submits no display list. Nothing crashes, nothing hangs, and the
 game is now further into its own initialisation than at any previous point.
+
+## The main loop runs, and the graphics pipeline is mapped end to end
+
+Fixing the busy-wait deadlock unblocked everything behind it. The twenty-call
+initialisation chain in func_800292F4 now completes, func_800263C8 runs through
+its state setup, and **the game's main loop turns continuously** -- roughly
+forty-eight game frames a second, with the per-frame body's four indirect calls
+all firing every frame. A handful of runs produced the port's first display
+lists. It is not yet steady, and the reason is now known precisely.
+
+### A tool for the deadlock class
+
+`tools/find_spin_loops.py` looks for the defect the previous section described,
+so the next one is a lookup rather than an investigation. The obvious rule --
+"a loop with no `jal`" -- is wrong, and wrong in the way that matters: the known
+case does contain a call, to a three-instruction leaf that reads one byte. What
+makes a loop dangerous is whether anything it calls can *reach* a yield point.
+So the tool builds the call graph, marks every function that can reach
+osSendMesg, osRecvMesg or osJamMesg at any depth, propagates each function's
+global reads and writes through non-yielding calls, and reports loops that read
+a global they never write and can never yield. Results are ranked by loop
+length, because a wait on another thread is almost always a handful of
+instructions.
+
+It ranks func_8008F344 first, which is the loop that was found the hard way, and
+second func_800FADC8 -- four instructions, spinning on the same byte through the
+same leaf. That one had not been reached yet and is patched now, because finding
+the identical defect a second time by bisection would be a waste.
+
+### Where the display list actually stops
+
+The pipeline is fully mapped, and every stage of it runs:
+
+    frame body                    -> func_80027B98        every frame
+      -> func_8008E5B8            -> func_8008EDC0        reached
+         func_8008EDC0 terminates the list (G_RDPFULLSYNC, G_ENDDL) and posts
+         to the task queue D_800CE2BC
+    task thread func_8008F5C0     receives command 0x378  516 times
+      -> state machine on D_800C8D24, states 3 and 5
+      -> gate func_800AE9DC       returns 1 about half the time
+      -> func_8008F378            entered 524 times
+         -> osRecvMesg(D_800CE2BC, NOBLOCK)               returns -1, always
+         -> osSpTaskLoad                                  never reached
+
+Every RSP task the port has submitted is type 2, audio -- 449 of them in
+fourteen seconds, zero graphics. Reading the type took two attempts: the first
+hooked before the `jal osSpTaskLoad` and read $a0, which is set in the *delay
+slot*, so it reported whatever the register happened to hold from an earlier
+call. That is the same class of mistake as the halfword read of a word field
+recorded above, and the same remedy applies -- know what you are reading before
+you believe it.
+
+So the remaining question is narrow: func_8008EDC0 posts the "a list is ready"
+message, and func_8008F378's non-blocking receive of it never finds one.
+func_8008EDC0 begins with a *blocking* osRecvMesg on D_800EFE68, so the next
+thing to establish is who posts to that queue and whether the producer is
+getting past it every frame or only once.
+
+Named this round: **osViGetCurrentFramebuffer** (0x80007CD0), which reads
+framep out of __osViCurr. func_8008F378 uses it to skip a frame whose buffer the
+VI is already showing; as game code it read a structure the runtime no longer
+maintains, since osViSwapBuffer is librecomp's and updates ultramodern's state
+instead. Naming it did not by itself start the display lists flowing -- the
+bail-out above happens earlier -- but it is correct regardless and would have
+become the next blocker.

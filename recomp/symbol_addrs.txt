@@ -547,3 +547,26 @@ osAiSetNextBuffer = 0x80007980; // type:func
 // parameter and tail-calls __osContGetInitData (func_80008CAC) with a scratch
 // byte for the bit pattern -- which is osContGetQuery exactly.
 osContGetQuery = 0x800087D0; // type:func
+
+// osViGetCurrentFramebuffer -- the last gate in front of the display list.
+//
+// With the busy-wait deadlock fixed the game reaches its main loop and turns it
+// continuously, and every part of the graphics pipeline runs: the frame body
+// builds a list, func_8008EDC0 terminates it and posts to the task thread, and
+// func_8008F378 -- the routine that actually submits a graphics task -- was
+// entered 524 times in fourteen seconds. It never reached its osSpTaskLoad.
+//
+// Its first act after taking the message is to ask which framebuffer the video
+// interface is currently showing, and to skip the submission if that is already
+// the buffer it was about to draw into. As game code that question is answered
+// out of __osViCurr at D_8001B630, a structure in RDRAM that the port's runtime
+// has no reason to maintain -- osViSwapBuffer is librecomp's now and updates
+// ultramodern's own state instead. So the answer was a constant, the comparison
+// matched, and the game skipped every frame it ever drew.
+//
+// Identified from the body: it takes the interrupt lock, loads the pointer at
+// D_8001B630, reads the word at offset 4 of what it points to -- framep in
+// __OSViContext, the same layout osViSwapBuffer writes -- and returns it. It is
+// in the reimplemented set, so librecomp answers it from the state that is
+// actually true.
+osViGetCurrentFramebuffer = 0x80007CD0; // type:func
