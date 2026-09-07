@@ -2,7 +2,7 @@
   "inputs": {
     "rom.z64": "e9a71380b43e25b9",
     "recomp/rayman2.us.yaml": "7b07d8a273e15858",
-    "recomp/rayman2.us.toml": "24357cc91db38ba3",
+    "recomp/rayman2.us.toml": "ad71eeac418e285f",
     "recomp/symbol_addrs.txt": "0f965c484f0ce675",
     "recomp/macro.inc": "5e4a2b83a686891b"
   },
@@ -20,7 +20,7 @@
       "files": 7
     },
     "RecompiledFuncs": {
-      "hash": "d343cce472321e32",
+      "hash": "400d016fc1dd6c8d",
       "files": 68
     }
   }

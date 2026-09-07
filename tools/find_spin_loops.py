@@ -56,6 +56,12 @@ LOAD = re.compile(r"^l[bhwd]u?$|^lwl$|^lwr$|^ll$")
 STORE = re.compile(r"^s[bhwd]$|^swl$|^swr$|^sc$")
 LO_REF = re.compile(r"%lo\(([A-Za-z_][A-Za-z0-9_]*)\)")
 TARGET = re.compile(r"\.(L[0-9A-Fa-f]+)\s*$")
+# A loop may also branch to the function's own entry label rather than to a
+# local one. func_8008FAF8 is exactly that shape -- two waits whose branches
+# both target `func_8008FAF8` -- and looking only for ".L" targets missed it,
+# which cost a day of bisection. Treat a branch to the enclosing function as a
+# branch to its first instruction.
+SELF_TARGET = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*$")
 JAL_TARGET = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*$")
 
 # The three routines that call check_running_queue and drain the external
@@ -120,10 +126,14 @@ def main():
         r, w = set(), set()
         for _, mnem, ops in body:
             for name in LO_REF.findall(ops):
-                if LOAD.match(mnem):
-                    r.add(name)
-                elif STORE.match(mnem):
+                # A %lo on any instruction counts as touching the global, not
+                # just on a load. MIPS materialises an address with lui/addiu
+                # and then dereferences a register, so the load itself carries
+                # no %lo -- which is how func_8008FAF8's two waits were missed.
+                if STORE.match(mnem):
                     w.add(name)
+                else:
+                    r.add(name)
         reads[func], writes[func] = r, w
 
     yields = set(YIELD_POINTS)
@@ -158,9 +168,13 @@ def main():
             if not BRANCH.match(mnem):
                 continue
             t = TARGET.search(ops)
-            if not t or t.group(1) not in labels:
-                continue
-            start = labels[t.group(1)]
+            if t and t.group(1) in labels:
+                start = labels[t.group(1)]
+            else:
+                st = SELF_TARGET.search(ops)
+                if not st or st.group(1) != func:
+                    continue
+                start = 0
             if start >= i:
                 continue
             span = body[start:i + 2]              # include the delay slot
@@ -175,10 +189,10 @@ def main():
             loads, stores = set(), set()
             for _, sm, so in span:
                 for name in LO_REF.findall(so):
-                    if LOAD.match(sm):
-                        loads.add(name)
-                    elif STORE.match(sm):
+                    if STORE.match(sm):
                         stores.add(name)
+                    else:
+                        loads.add(name)
             for c in callees:
                 loads |= reads.get(c, set())
                 stores |= writes.get(c, set())

@@ -34,13 +34,23 @@
 // be the exact analogue and is normally safe, because VI retrace alone supplies
 // a message every frame -- but "normally" is doing real work in that sentence,
 // and a spin that turns into a hard block if the supply ever dries up trades a
-// visible busy-wait for an invisible hang. One millisecond costs nothing and
-// cannot deadlock.
+// visible busy-wait for an invisible hang.
+//
+// MEASURED, not reasoned. The obvious refinement is to poll with a zero timeout
+// in waits that run once per frame, on the argument that a millisecond of
+// latency is a large fraction of a sixteen-millisecond frame. Measured over
+// five runs each, that is wrong: polling gave peak display-list rates of
+// 34, 37, 45, 15 and 18 per second, and sleeping one millisecond gave
+// 33, 36, 39, 50 and 40 -- better on the median and far steadier. A hot poll
+// takes CPU away from the native renderer and audio threads, and losing that
+// costs more than the latency saves. One millisecond it is.
 
 #include <cstdint>
 
 #include "ultramodern/ultramodern.hpp"
 
+// Deliver one pending external event and let a higher-priority runnable thread
+// take over -- what the counter interrupt would have done.
 extern "C" void rayman2_yield_in_spin(uint8_t* rdram) {
     ultramodern::wait_for_external_message_timed(rdram, 1);
     ultramodern::check_running_queue(rdram);

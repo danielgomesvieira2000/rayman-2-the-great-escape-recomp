@@ -1065,3 +1065,70 @@ It then stalls, in func_80026F38, reached from the frame body's second indirect
 call. That function is self-recursive and none of its callees is a spin by the
 tool's reckoning, so the next round starts by probing its call sites rather than
 assuming it is the same defect a fourth time.
+
+## Who posts to D_800EFE68, and the wait that was hiding behind it
+
+The question that opened this round had a clean answer. `D_800EFE68` is a
+one-slot semaphore holding the free framebuffer, seeded once in func_8008F878.
+The only thing that posts to it is **func_8008F554**, which the task thread runs
+on command `0x3E7` -- and 0x3E7 is what `osSetEventMesg(OS_EVENT_DP, ...)`
+registers, so the slot comes back on RDP completion and on nothing else. Read in
+full, the frame handshake is:
+
+    func_8008EDC0   takes the free slot, terminates the list, posts D_800CE2BC
+    func_8008F378   takes that, submits the graphics task
+    RDP finishes    -> dp_complete() -> 0x3E7 -> func_8008F554
+    func_8008F554   osViSwapBuffer, then returns the slot to D_800EFE68
+
+Two things were breaking it, and both were the busy-wait defect again.
+
+The first is recorded in the previous section: the idle thread was the only
+runnable thread at the moment the RDP completion arrived, and it drains nothing.
+The RDP message was measured being enqueued with the right queue and value and
+never dequeued by any consumer. Pumping **both halves** of the idle loop moved
+the display-list count from one to twenty-odd.
+
+The second was found by the thread sampler rather than by bisection, after
+hand-placed probes had chased it through four levels of call chain without
+pinning it: 147 of about 170 in-code samples sat in **func_8008FAF8**, which is
+
+    while (D_800CE2C4 != 0) { }   // the display list queue must drain
+    while (D_800EFE70 != 1) { }   // and a flag must be set
+
+with no calls at all. Pumping it took the rate from a burst of twenty to a
+steady thirty-five to forty display lists a second, touching sixty.
+
+### Two blind spots in the tool, both now fixed
+
+`tools/find_spin_loops.py` did not report func_8008FAF8, and understanding why
+made it better:
+
+  * **Branch targets that are function labels.** Both of its branches target
+    `func_8008FAF8` itself, and the scanner only recognised local `.L` labels. A
+    branch to the enclosing function is now treated as a branch to its first
+    instruction.
+  * **Addresses materialised before the load.** MIPS builds an address with
+    lui/addiu and then dereferences a register, so the load carries no `%lo` for
+    the scanner to see. Any `%lo` reference in the body now counts as touching
+    that global, not only one attached to a load.
+
+### One reasoned refinement that measurement rejected
+
+The obvious improvement is to poll with a zero timeout in waits on the frame
+path, since a millisecond of latency is a large fraction of a sixteen
+millisecond frame. Measured over five runs each, peak display-list rates were
+34, 37, 45, 15, 18 polling against 33, 36, 39, 50, 40 sleeping -- better on the
+median and far steadier asleep. A hot poll takes CPU from the native renderer
+and audio threads and loses more than the latency saves. The helper stays at one
+millisecond, and the numbers are in the source so it is not "optimised" back.
+
+### Where it stands
+
+The port renders. Display lists reach RT64 continuously, peaking at 35-40 per
+second and touching 60, from a frame loop whose whole handshake is working.
+
+The rate is not yet steady, and the next candidates are already listed rather
+than needing to be hunted: `find_spin_loops.py` ranks func_800393CC and
+func_8003941C (a mutually recursive pair on D_800CC620/D_800CC628),
+func_80090D00, func_800AA9AC and func_800AA9F8 above everything else. Each is
+five instructions, waits on a global it never writes, and cannot reach a yield.

@@ -182,3 +182,25 @@ text = "rayman2_yield_in_spin(rdram);"
 func = "func_800004C0"
 before_vram = 0x800006A4
 text = "rayman2_yield_in_spin(rdram);"
+
+# The wait that sat between the game and a steady frame rate.
+#
+# func_8008FAF8 is two back-to-back busy-waits with no calls at all:
+#
+#     while (D_800CE2C4 != 0) { }   // the display-list queue must drain
+#     while (D_800EFE70 != 1) { }   // and a flag must be set
+#
+# Both branches target the function's own entry, so one hook at 0x8008FAF8
+# covers both. The thread sampler found it -- 147 of ~170 in-code samples sat
+# here -- after hand-placed probes had chased it through four levels of call
+# chain without pinning it.
+#
+# It also exposed two blind spots in tools/find_spin_loops.py, both now fixed:
+# the branch target is a function label rather than a local ".L" one, and the
+# globals are dereferenced through a register whose address was materialised by
+# lui/addiu, so the load carries no %lo for the scanner to see.
+[[patches.hook]]
+func = "func_8008FAF8"
+before_vram = 0x8008FAF8
+text = "rayman2_yield_in_spin(rdram);"
+

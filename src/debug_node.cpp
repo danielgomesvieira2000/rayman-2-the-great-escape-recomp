@@ -159,7 +159,7 @@ extern "C" void rayman2_debug_count(uint8_t* rdram, uint32_t site) {
     // investigations. A raw trace distinguishes them without inference.
     static unsigned long long seq = 0;
     static const std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
-    if (seq < 400) {
+    if (seq < 20000) {
         const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                  std::chrono::steady_clock::now() - t0).count();
         std::fprintf(stderr, "[rayman2] trace %llu  %08X  +%lldms" NL, seq, site, ms);
