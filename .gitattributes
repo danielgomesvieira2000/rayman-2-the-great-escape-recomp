@@ -1,0 +1,12 @@
+* text=auto eol=lf
+
+*.png binary
+*.svg text
+*.z64 binary
+*.n64 binary
+*.v64 binary
+*.elf binary
+*.bin binary
+*.ttf binary
+*.otf binary
+*.ico binary

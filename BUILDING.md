@@ -1,0 +1,118 @@
+# Building rayman-2-the-great-escape-recomp
+
+> **Phase 00.** Only the ROM tooling runs today; there is no game build yet.
+> This document describes the prerequisites and the pipeline as it comes online,
+> so the environment can be stood up in parallel with phase 01. The phase gates
+> are in [docs/PLAN.md](docs/PLAN.md).
+
+## What you need first
+
+A **legally-dumped USA cartridge** of Rayman 2: The Great Escape. Nothing here
+ships game data, and nothing here will help you obtain it.
+
+Verify it before anything else:
+
+```bash
+python tools/identify_rom.py path/to/rom.z64
+```
+
+It accepts `.z64`, `.v64` and `.n64` dumps, normalises to big-endian, and exits
+non-zero unless the dump is SHA-1
+`50558356b059ad3fbaf5fe95380512b9dceaaf52` (NUS-NY2E, version 0). Other
+revisions and regions are not supported; see [docs/PLAN.md](docs/PLAN.md).
+
+To reproduce the measurements the plan rests on:
+
+```bash
+python tools/survey_rom.py path/to/rom.z64
+```
+
+Both tools need only Python 3.9+ and the standard library.
+
+## Two toolchains, which are not the same thing
+
+Don't conflate them — the sibling ports both lost time to this:
+
+- **The host app** (runtime + RT64 + the recompiled C) → **clang-cl** on
+  Windows, **clang** on Linux and macOS, via CMake + Ninja.
+- **The MIPS patches** (phase 06 onward) → cross-compiled with
+  `clang -target mips` + `ld.lld`, **pinned to LLVM 18.1.8**. LLVM 19.x
+  miscompiles MIPS, and Apple Clang cannot target MIPS at all.
+
+A third toolchain appears in phase 01: **splat**, run under Linux or WSL, to
+split the ROM and assemble the symbol-rich ELF. Only the recomp builds natively
+on Windows.
+
+Cross-platform by design (RT64: D3D12 on Windows, Vulkan on Linux, Metal on
+macOS). Windows is the primary target.
+
+## Prerequisites — Windows
+
+No full Visual Studio IDE is needed; **CLion** plus the **VS Build Tools** is
+enough.
+
+1. **Build Tools for Visual Studio 2022** with the **Desktop development with
+   C++** workload (MSVC v143 + a Windows 10/11 SDK) and the **C++ Clang tools
+   for Windows** component, which provides `clang-cl`:
+
+   ```
+   winget install Microsoft.VisualStudio.2022.BuildTools --override ^
+     "--quiet --add Microsoft.VisualStudio.Workload.VCTools ^
+      --add Microsoft.VisualStudio.Component.VC.Llvm.Clang --includeRecommended"
+   ```
+
+   Or take `clang-cl` from a standalone LLVM (`winget install LLVM.LLVM`, any
+   LLVM 17–19).
+2. **CMake ≥ 3.20 and Ninja** — CLion bundles both.
+3. **WSL** with a Ubuntu distribution, for splat and the ELF assembly.
+
+RT64's D3D12 backend needs only the Windows SDK and RT64's bundled DXC
+(`lib/RT64/src/contrib/dxc`) — **no** DirectX Agility SDK. SDL2 is fetched
+automatically, and the runtime DLLs are copied next to the executable by the
+build.
+
+## Prerequisites — Linux
+
+```bash
+sudo apt-get install cmake ninja-build libsdl2-dev libgtk-3-dev \
+                     libfreetype-dev lld llvm clang python3-venv
+```
+
+Build with **clang**; GCC fails the final link on recompiled-symbol collisions.
+RT64 uses Vulkan here.
+
+## Prerequisites — macOS
+
+Native Metal via RT64. Needs Homebrew LLVM plus CMake and Ninja. Apple Clang
+builds the host app but **cannot** build the MIPS patches — use Homebrew LLVM
+18.x for those.
+
+## The pipeline, once phase 01 lands
+
+```bash
+# 1. Dependencies and the recompiler itself.
+git submodule update --init --recursive
+scripts/setup.sh                 # or scripts/setup.ps1  -> builds N64Recomp + RSPRecomp
+
+# 2. Split the ROM and assemble the symbol-rich ELF (WSL / Linux).
+scripts/split-rom.sh path/to/rom.z64          # splat -> asm/ -> elf/rayman2.us.elf
+
+# 3. Recompile the game to C.
+./N64Recomp recomp/rayman2.us.toml            # -> RecompiledFuncs/*.c
+
+# 4. Configure and build the port.
+cmake -S . -B build-cmake -G Ninja \
+      -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl \
+      -DCMAKE_BUILD_TYPE=Release
+cmake --build build-cmake -j
+```
+
+Re-run step 3 whenever the ELF or any `recomp/*.toml` changes.
+
+## Notes
+
+- Keep the tree LF-normalised (`.gitattributes`) even on Windows.
+- **Never commit a ROM, an ELF, or anything derived from them.** `.gitignore`
+  is written to refuse them, but it is a safety net, not the rule.
+- **Never hand-edit generated code.** Fix the config, or add a script under
+  `tools/`; a hand-edit is lost at the next regeneration.

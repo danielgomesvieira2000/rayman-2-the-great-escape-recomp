@@ -1,0 +1,46 @@
+# N64Recomp configuration for Rayman 2: The Great Escape (USA, NUS-NY2E rev 0).
+#
+# Run with:  ./N64Recomp recomp/rayman2.us.toml     (emits RecompiledFuncs/*.c)
+# Reference: https://github.com/N64Recomp/N64Recomp
+#
+# STATUS: phase 00 skeleton. The ELF this points at does not exist yet -- it is
+# produced in phase 01 by splitting the ROM with splat and assembling the
+# result. See docs/PLAN.md.
+
+[input]
+# VRAM entry point, from the cartridge header at offset 0x8. The flat code
+# image loads here contiguously from ROM 0x1000; see docs/PHASE00-FINDINGS.md.
+entrypoint = 0x80000400
+
+# Symbol-rich, assembly-only ELF assembled from splat output (phase 01).
+# Build artifact, derived from the user's own ROM: never committed.
+elf_path = "elf/rayman2.us.elf"
+
+# Per-function C output, one file per function. Build artifact; git-ignored.
+output_func_path = "RecompiledFuncs"
+
+# No relocatable overlay sections: the survey found one flat KSEG0 image with
+# no module system (docs/PHASE00-FINDINGS.md section 3). If phase 01 disproves
+# that, this is where the section list goes.
+# relocatable_sections_path = "recomp/overlays.us.txt"
+
+[patches]
+# Functions emitted as empty stubs -- raw RCP/hardware pokes the runtime
+# handles itself. Populated during phase 04 bring-up as they are found.
+stubs = [
+]
+
+# Symbols that look like functions but are not: data mislabeled as code.
+# Expect entries here -- the survey's block scan shows data interleaved with
+# code inside the image (the microcode blob at ROM 0x1CD10, and the tail
+# tables past 0xC0000).
+ignored = [
+]
+
+# Single-instruction patches to the target binary, e.g. neutralising a
+# hardware write:
+#
+# [[patches.instruction]]
+# func  = "SomeFunc"
+# vram  = 0x80001234
+# value = 0x00000000   # -> nop
