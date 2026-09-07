@@ -996,3 +996,72 @@ maintains, since osViSwapBuffer is librecomp's and updates ultramodern's state
 instead. Naming it did not by itself start the display lists flowing -- the
 bail-out above happens earlier -- but it is correct regardless and would have
 become the next blocker.
+
+## The game renders
+
+Two defects stood between the frame loop and the screen. Both are the *same*
+defect as the busy-wait deadlock, in forms that did not look like it.
+
+### The message-queue control is never installed
+
+ultramodern delivers everything that happens outside the game -- VI retrace, RSP
+and RDP completion, PI and SI -- through a queue drained inside osSendMesg,
+osRecvMesg and osJamMesg. When a delivery finds the destination queue
+momentarily full it either puts the message back or discards it, and which of
+those it does comes from a bitset installed by
+`ultramodern::set_message_queue_control`.
+
+Nothing calls it. Not the port, and not ultramodern itself. So the bitset is
+default-constructed with every bit clear, and every source is "discard". The
+struct's own defaults say what was intended -- requeue timer, RSP, SI and RDP;
+drop VI, AI and PI -- and the port now installs them, which is both the fix and
+a statement of the policy.
+
+For most sources a discard is survivable because another message follows: VI
+retrace comes again in sixteen milliseconds. For the RDP it is fatal. Rayman 2's
+frame loop is a strict handshake with exactly one message per frame, and losing
+one stops it permanently, because the next one is only produced by the frame the
+lost message was supposed to permit.
+
+This was a real latent defect and is fixed. It was not, however, what was
+blocking.
+
+### The idle thread is the pump of last resort
+
+The RDP completion was measured being enqueued with the right queue and the
+right message value, and then never dequeued by any of the three consumers. The
+reason is that at that instant no game thread could reach one: the producer was
+blocked waiting for the framebuffer slot the completion would return, every
+other thread was parked, and the only thread still running was the idle thread
+-- spinning in game code, calling nothing that drains.
+
+libultra's idle thread is entitled to spin, because interrupts fire regardless
+of what is running. ultramodern's cannot: `run_next_thread` throws if no thread
+is runnable, so the idle thread must always be there, and while it is the only
+runnable thread it is also the only possible pump.
+
+The fix injects the same yield used for func_8008F344. It has to go in **both**
+halves of the loop, and the second half is the one that matters:
+
+    .L8000069C: lhu $v0, D_800250D8      ; reload the flag
+    .L800006A4: bne $v0, $s0, .L800006A4 ; branch to itself, no reload
+                jal func_8008F86C
+                j   .L8000069C
+
+Hooking only the outer loop moved the display-list count from 1 to 0. The inner
+branch targets itself over a register the body never reloads, so once taken the
+outer hook never runs again -- the pump was installed in the half that was not
+running. With both halves pumped the count went from 1 to twenty-odd.
+
+### Where it stands
+
+**The game renders.** Twenty-two or twenty-three display lists reach RT64 in the
+first second, produced by a frame loop that is genuinely turning: the trace
+shows func_8008F554 releasing the framebuffer, func_8008EDC0 taking it and
+posting the next list, and the frame body cycling through all four of its
+indirect calls. That is the whole handshake working.
+
+It then stalls, in func_80026F38, reached from the frame body's second indirect
+call. That function is self-recursive and none of its callees is a spin by the
+tool's reckoning, so the next round starts by probing its call sites rather than
+assuming it is the same defect a fourth time.

@@ -151,3 +151,34 @@ text = "rayman2_yield_in_spin(rdram);"
 func = "func_800FADC8"
 before_vram = 0x800FB018
 text = "rayman2_yield_in_spin(rdram);"
+
+# The idle thread is the pump of last resort, and it never yields.
+#
+# libultra's idle thread may spin because interrupts fire regardless of what is
+# running. ultramodern has no interrupts: VI retrace, RSP and RDP completion are
+# queued from outside and delivered only inside osSendMesg, osRecvMesg and
+# osJamMesg. This loop -- func_800004C0, priority 0 -- calls only func_8008F86C,
+# which reaches none of those, so while it runs nothing is delivered.
+#
+# That is fine while some other thread is runnable, and fatal the moment none
+# is. Rayman 2's frame handshake ends in exactly that state: the producer blocks
+# waiting for the free framebuffer that the RDP completion will return, every
+# other thread is parked, and the idle thread spins. The completion message was
+# measured being enqueued with the right queue and the right value, and then
+# never dequeued by any of the three consumers -- because the only thread left
+# running could not reach one. One display list, ever.
+[[patches.hook]]
+func = "func_800004C0"
+before_vram = 0x8000069C
+text = "rayman2_yield_in_spin(rdram);"
+
+# The inner half of the same loop.
+#
+# 0x800006A4 is `bne $v0, $s0, .L800006A4` -- a branch to itself over a register
+# that the body never reloads. If it is ever taken the thread spins there
+# forever and the outer hook above never runs again, so the pump has to be in
+# both halves.
+[[patches.hook]]
+func = "func_800004C0"
+before_vram = 0x800006A4
+text = "rayman2_yield_in_spin(rdram);"
