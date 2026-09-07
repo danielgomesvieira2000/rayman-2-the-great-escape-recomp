@@ -225,6 +225,9 @@ target_compile_definitions(rayman2-recomp PRIVATE HLSL_CPU)
 if(RAYMAN2_ENABLE_FRONTEND)
     target_compile_definitions(rayman2-recomp PRIVATE RAYMAN2_ENABLE_FRONTEND)
     target_link_libraries(rayman2-recomp PRIVATE recompui recompinput)
+    # The launcher, config menus and input binding. Only meaningful with the
+    # frontend, and it will not compile without its headers.
+    target_sources(rayman2-recomp PRIVATE src/frontend.cpp)
 endif()
 
 target_link_libraries(rayman2-recomp PRIVATE ${SDL2_LIBRARIES})
@@ -271,4 +274,27 @@ if(RAYMAN2_ENABLE_FRONTEND)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${RMLUI_ASSETS}/${font}" "$<TARGET_FILE_DIR:rayman2-recomp>/assets/${font}")
     endforeach()
+
+    # promptfont: the glyph font recompui uses to draw controller and keyboard
+    # symbols on binding buttons. Unlike the icons, a missing file here is not a
+    # missing button -- ui_state.cpp loads assets/promptfont/promptfont.ttf by
+    # name during renderer bring-up, before anything is drawn, and the frontend
+    # reports the font as missing. It is not part of RmlUi's samples, so it is
+    # committed here (SIL Open Font License 1.1, licence text alongside it).
+    add_custom_command(TARGET rayman2-recomp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:rayman2-recomp>/assets/promptfont"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/promptfont"
+                "$<TARGET_FILE_DIR:rayman2-recomp>/assets/promptfont")
+
+    # The menu icons. recompui builds its header buttons from assets/icons/*.svg
+    # by name -- Quit and X in the config modal, Caret in dropdowns, Cont and
+    # Keyboard in the Controls tab, and so on -- so a missing file is a missing
+    # button rather than an error. These are the same set the sibling ports use,
+    # so the three look like one family.
+    add_custom_command(TARGET rayman2-recomp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:rayman2-recomp>/assets/icons"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons"
+                "$<TARGET_FILE_DIR:rayman2-recomp>/assets/icons")
 endif()

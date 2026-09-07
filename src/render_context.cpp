@@ -11,12 +11,84 @@
 // while recompui's factory takes a presentation mode as well. This adapter
 // supplies it.
 
+#include <cstdio>
 #include <memory>
 
+#ifdef _WIN32
+#include <objbase.h>
+#endif
+
+#include "rhi/rt64_render_hooks.h"
 #include "ultramodern/renderer_context.hpp"
 #include "recompui/renderer.h"
 
+namespace {
+
+// Make the launcher's "Load ROM" file dialog work.
+//
+// The chain is: the player clicks the option, RmlUi dispatches the element
+// callback, recompui calls NFD_OpenDialogN, and NFD calls
+// CoCreateInstance(CLSID_FileOpenDialog). COM is per-thread, and nothing in
+// RecompFrontend, librecomp, ultramodern or RT64 ever calls NFD_Init or
+// CoInitializeEx -- the frontend leaves that to the port. Without it
+// CoCreateInstance returns CO_E_NOTINITIALIZED, NFD returns NFD_ERROR, and
+// recompui treats that exactly like the player pressing Cancel. Clicking
+// "Load ROM" therefore highlighted the option and did nothing at all: no
+// dialog, no error, no log line.
+//
+// The thread it has to happen on is not an obvious one, and guessing costs a
+// build each time. Three separate threads are involved, and instrumenting all
+// three was the only way to tell them apart:
+//
+//     main thread                 runs main() and recomp::start
+//     gfx thread                  runs ultramodern's gfx_thread_func, which is
+//                                 what calls this very function
+//     RT64 present-queue thread   runs the render hooks -- and the menus
+//
+// recompui draws its menus from RT64's draw hook (rt64_present_queue.cpp), and
+// it also dequeues and dispatches input events there, so the click callback --
+// and the dialog -- runs on the present-queue thread. Initialising COM in
+// main(), or here in the renderer factory on the gfx thread, leaves that thread
+// untouched and changes nothing; both were tried first and neither moved the
+// probe off "Could not create dialog."
+//
+// So wrap RT64's draw hook. recompui installs its hooks at the top of its
+// RT64Context constructor, before the application exists, so by the time the
+// factory below returns they are in place and can be read back and chained.
+// The initialisation is thread_local, which is the point: it runs once on
+// whichever thread RT64 ends up calling the hook from, without this code having
+// to know which thread that is.
+
+RT64::RenderHookDraw* recompui_draw_hook = nullptr;
+
+void draw_hook_with_com(RenderCommandList* list, RenderFramebuffer* swap_chain_framebuffer) {
+#ifdef _WIN32
+    // Apartment-threaded, matching what NFD_Init would request. There is no
+    // matching CoUninitialize: this thread lives as long as the renderer.
+    static thread_local const bool com_ready = []() {
+        const HRESULT hr = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        // RPC_E_CHANGED_MODE means COM is already up on this thread in the
+        // other mode, which is fine. Anything else is worth saying out loud,
+        // because the symptom is otherwise a dead menu item.
+        if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) {
+            std::fprintf(stderr, "[rayman2] CoInitializeEx failed (0x%08lX); "
+                                 "the Load ROM dialog will not open\n",
+                         static_cast<unsigned long>(hr));
+        }
+        return true;
+    }();
+    (void)com_ready;
+#endif
+
+    if (recompui_draw_hook != nullptr) {
+        recompui_draw_hook(list, swap_chain_framebuffer);
+    }
+}
+
+} // namespace
+
 namespace rayman2 {
+
 
 std::unique_ptr<ultramodern::renderer::RendererContext>
 create_render_context(uint8_t* rdram,
@@ -28,11 +100,22 @@ create_render_context(uint8_t* rdram,
     // when frames appear relative to the game's own timing, and phase 04 needs
     // to be able to trust that what is on screen is what the game just drew.
     // Revisit alongside the high-framerate work in phase 06.
-    return recompui::renderer::create_render_context(
+    auto context = recompui::renderer::create_render_context(
         rdram,
         window_handle,
         ultramodern::renderer::PresentationMode::Console,
         developer_mode);
+
+    // Chain the draw hook, once. The guard matters if the renderer is ever
+    // recreated: wrapping our own wrapper would recurse until the stack ran
+    // out, on the thread that draws every frame.
+    RT64::RenderHookDraw* installed = RT64::GetRenderHookDraw();
+    if (installed != nullptr && installed != draw_hook_with_com) {
+        recompui_draw_hook = installed;
+        RT64::SetRenderHooks(RT64::GetRenderHookInit(), draw_hook_with_com, RT64::GetRenderHookDeinit());
+    }
+
+    return context;
 }
 
 } // namespace rayman2

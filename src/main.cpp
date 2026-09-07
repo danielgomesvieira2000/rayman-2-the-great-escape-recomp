@@ -32,6 +32,8 @@
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
 #ifdef _WIN32
+#include <ShlObj.h>      // SHGetKnownFolderPath, for the per-user config path.
+#include <objbase.h>     // CoTaskMemFree, which SHGetKnownFolderPath allocates with.
 #include <SDL_syswm.h>   // SDL_GetWindowWMInfo -> native HWND.
                          // Windows only: on Linux the WindowHandle IS the
                          // SDL_Window*, and this header drags in <X11/X.h>,
@@ -78,6 +80,18 @@ void rayman2_stop_thread_sampler();
 // src/rt64_context.cpp -- set true once the renderer has presented a frame.
 namespace rayman2 { std::atomic<bool>& vi_has_ticked(); }
 
+#ifdef RAYMAN2_ENABLE_FRONTEND
+// src/frontend.cpp -- the launcher, config menus and input binding.
+namespace rayman2 {
+    void frontend_init();
+    void frontend_poll_input();
+    bool frontend_get_input(int controller_num, uint16_t* buttons, float* x, float* y);
+    void frontend_set_rumble(int controller_num, bool on);
+    void frontend_handle_events();
+    void frontend_shutdown();
+}
+#endif
+
 // src/render_context.cpp
 namespace rayman2 {
     std::unique_ptr<ultramodern::renderer::RendererContext>
@@ -102,7 +116,10 @@ namespace {
 // 50558356b059ad3fbaf5fe95380512b9dceaaf52. See docs/PHASE00-FINDINGS.md.
 constexpr uint64_t kRayman2UsaRomHash = 0x8b09d8d807f8dcbdULL;
 
-const recomp::Version kProjectVersion{0, 3, 0};
+// The port's own version, shown bottom-left on the launcher. librecomp always
+// renders it as major.minor.patch, so this reads "v0.1.0"; it is also what
+// mods are checked against with minimum_recomp_version.
+const recomp::Version kProjectVersion{0, 1, 0};
 
 // ---------------------------------------------------------------------------
 // Error reporting
@@ -117,6 +134,45 @@ void message_box(const char* msg) {
 // Graphics: the window RT64 attaches to
 // ---------------------------------------------------------------------------
 
+// Where this port keeps its settings, key bindings and the ingested ROM.
+//
+// librecomp defaults its config path to an empty path, which resolves against
+// the process working directory. That is wrong in two ways at once: settings
+// follow whatever directory the executable happened to be launched from, so
+// they appear to reset; and an installed copy under Program Files cannot write
+// there at all. Nothing sets it -- register_config_path exists and no part of
+// the runtime or the frontend calls it -- so the port has to.
+//
+// The directory name is the program id registered with recompui, so the
+// frontend and librecomp agree on one location.
+std::filesystem::path app_folder_path() {
+    std::filesystem::path base;
+#ifdef _WIN32
+    PWSTR known = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &known))) {
+        base = known;
+        CoTaskMemFree(known);
+    }
+#elif defined(__APPLE__)
+    if (const char* home = std::getenv("HOME")) {
+        base = std::filesystem::path(home) / "Library" / "Application Support";
+    }
+#else
+    if (const char* xdg = std::getenv("XDG_DATA_HOME")) {
+        base = xdg;
+    }
+    else if (const char* home = std::getenv("HOME")) {
+        base = std::filesystem::path(home) / ".local" / "share";
+    }
+#endif
+    if (base.empty()) {
+        // Last resort: the working directory, which is what the runtime would
+        // have used anyway. Better than refusing to start.
+        return std::filesystem::current_path();
+    }
+    return base / "rayman2-recomp";
+}
+
 ultramodern::gfx_callbacks_t::gfx_data_t create_gfx() {
     if (SDL_InitSubSystem(SDL_INIT_VIDEO) != 0) {
         message_box(("SDL video init failed: " + std::string(SDL_GetError())).c_str());
@@ -126,9 +182,13 @@ ultramodern::gfx_callbacks_t::gfx_data_t create_gfx() {
 }
 
 ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::gfx_data_t) {
+    // 800x600: 4:3, matching the game's own aspect, and small enough to sit on
+    // a laptop screen without being dragged smaller on every launch. It is a
+    // starting size, not a constraint -- the window is resizable and the
+    // Graphics tab offers fullscreen.
     window = SDL_CreateWindow("Rayman 2: The Great Escape — Recompiled",
                                 SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                1280, 960,
+                                800, 600,
                                 SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
     if (window == nullptr) {
         message_box(("Failed to create window: " + std::string(SDL_GetError())).c_str());
@@ -149,6 +209,10 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 
 // Pumps the OS event queue. Runs on the thread that created the window.
 void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
+#ifdef RAYMAN2_ENABLE_FRONTEND
+    rayman2::frontend_handle_events();
+    return;
+#else
     SDL_Event ev;
     while (SDL_PollEvent(&ev)) {
         switch (ev.type) {
@@ -159,6 +223,7 @@ void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
                 break;
         }
     }
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -277,11 +342,18 @@ size_t get_frames_remaining() {
 // ---------------------------------------------------------------------------
 
 void poll_input() {
+#ifdef RAYMAN2_ENABLE_FRONTEND
+    rayman2::frontend_poll_input();
+#else
     // SDL events are pumped in update_gfx; keyboard state is read directly below.
     SDL_PumpEvents();
+#endif
 }
 
 bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
+#ifdef RAYMAN2_ENABLE_FRONTEND
+    return rayman2::frontend_get_input(controller_num, buttons, x, y);
+#else
     if (controller_num != 0) {
         return false;
     }
@@ -365,9 +437,18 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
     *x = ax;
     *y = ay;
     return true;
+#endif
 }
 
-void set_rumble(int, bool) {
+void set_rumble(int controller_num, bool on) {
+#ifdef RAYMAN2_ENABLE_FRONTEND
+    rayman2::frontend_set_rumble(controller_num, on);
+#else
+    (void)controller_num; (void)on;
+#endif
+}
+
+void set_rumble_unused(int, bool) {
     // No rumble: port 1 advertises a Controller Pak, not a Rumble Pak.
 }
 
@@ -497,6 +578,17 @@ int main(int argc, char** argv) {
     // otherwise an explicit path argument is validated and cached. The player is
     // only ever asked once.
     const std::u8string game_id = supported_games[0].game_id;
+    // Must precede check_all_stored_roms() and, with the frontend,
+    // frontend_init(): the first looks for the ingested ROM under this path and
+    // the second loads the saved key bindings from it.
+    {
+        std::error_code ec;
+        const std::filesystem::path cfg = app_folder_path();
+        std::filesystem::create_directories(cfg, ec);
+        recomp::register_config_path(cfg);
+        std::fprintf(stderr, "[rayman2] config path: %s\n", cfg.string().c_str());
+    }
+
     recomp::check_all_stored_roms();
     bool have_rom = recomp::is_rom_valid(game_id);
 
@@ -639,6 +731,12 @@ int main(int argc, char** argv) {
     // The family name is the font's internal one, not its filename.
     recompui::register_primary_font("LatoLatin-Regular.ttf", "LatoLatin");
     recompui::register_extra_font("NotoEmoji-Regular.ttf");
+
+    // Default bindings and the config tabs, then finalize(). recompui builds
+    // its menus inside RT64 setup and the config modal throws if no
+    // configuration has been loaded, so this cannot wait until after start().
+    // See src/frontend.cpp.
+    rayman2::frontend_init();
 #endif
 
     // recomp::start() brings up the renderer, and the frontend builds its menus
