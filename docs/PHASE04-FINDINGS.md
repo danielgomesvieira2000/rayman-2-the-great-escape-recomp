@@ -1197,3 +1197,53 @@ enough and it is the next thing to look at.
 The remaining diagnostic scaffolding is gone. Seven hooks are active and every
 one is load-bearing: the section registration, four spin pumps, and main's time
 wait. No instruction patches.
+
+## The prompt was never broken
+
+The previous section ended by saying the Controller Pak prompt renders nothing,
+that a player would see a black screen with no indication input was wanted, and
+that this was the next thing to fix. **All of that was wrong**, and it was wrong
+in an instructive way.
+
+The evidence for it was the display-list counter reading zero for the whole time
+the game sat at the prompt. That is true, and it means what it says: the RDP is
+doing no work. It was then taken to mean the screen is blank, which does not
+follow. The game draws that screen with the **CPU**, writing pixels straight into
+RDRAM, and submits no display list at all. RT64 presents it perfectly.
+
+Dumping the framebuffer the VI is pointed at settles it -- 49,472 non-black
+pixels of 67,200, stable frame to frame -- and capturing the window shows the
+finished article: the forest background, "No Controller Pak found. The game will
+not be saved.", "Insert a Controller Pak and press the A Button.", "Press START
+to continue without saving." Exactly what the hardware shows.
+
+Two instruments came out of this and both are kept, because between them they
+answer a question no counter in this port could:
+
+  * `RAYMAN2_FBPROBE` in src/rt64_context.cpp reports and dumps the framebuffer
+    the VI is scanning out; `tools/fb_to_png.py` makes the dump viewable. It
+    handles the two details that matter -- RDRAM is word-swapped, so byte i of a
+    big-endian word lives at index i^3, and the format is RGBA5551 whose 5-bit
+    channels must be scaled by bit replication rather than shifted.
+  * `tools/grab_window.ps1` captures the actual window. What the game drew and
+    what the player sees are different questions, and only the second one is the
+    one that matters.
+
+The framebuffer is 300x224, not 320x240 -- main sets 0x12C by 0xE0 after the
+initial 0x140 by 0xF0 -- which is worth knowing, because reading the dump at the
+wrong width produces a plausible-looking diagonal smear rather than an obvious
+error.
+
+## Phase 04 is met
+
+The gate was "Ubisoft logo, then the attract sequence rendering recognisably".
+The port boots, shows its Controller Pak prompt, takes a button press, and plays
+the intro cinematic: a 3D seascape with cliffs, sky and water, carrying the
+narration "RAYMAN, LOOK WHAT THE PIRATES HAVE DONE TO OUR WORLD..." and "A
+PLANET OF ANGUISH AND PAIN, HAUNTED BY EVIL." Thirty seconds, 1274 display
+lists, a sustained 58-61 per second, zero crashes.
+
+Seven hooks remain and every one is load-bearing: the static section
+registration and six spin pumps. No instruction patches. The remaining known
+gaps are audio, which is phase 05 and deliberately stubbed in src/rsp.cpp, and
+the input mapping, which is phase 06.

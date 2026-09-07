@@ -330,6 +330,57 @@ void RT64Context::update_screen() {
     // while the game has not started, so starting first races it and the update
     // path dereferences a mode that is not there yet.
     rayman2::vi_has_ticked().store(true, std::memory_order_release);
+
+    // Report and dump the framebuffer the VI is pointed at (RAYMAN2_FBPROBE).
+    //
+    // This exists because the display-list counter cannot answer the question
+    // it looks like it answers. The counter read zero all the way through the
+    // Controller Pak prompt, which was taken as "the prompt does not render" --
+    // and that was wrong. The game draws that screen with the CPU, straight
+    // into RDRAM, submitting no display list at all, and RT64 presents it
+    // perfectly. A counter of RDP work says nothing about a picture drawn
+    // without the RDP.
+    //
+    // So: this says what is in the framebuffer, and tools/grab_window.ps1 says
+    // what is on the screen. Between them a black window can be attributed to
+    // the game drawing nothing or to the port failing to present something,
+    // which is a distinction no counter here can make.
+    static const bool fb_probe = std::getenv("RAYMAN2_FBPROBE") != nullptr;
+    if (fb_probe) {
+        using clock = std::chrono::steady_clock;
+        static clock::time_point last_fb = clock::now();
+        const clock::time_point now_fb = clock::now();
+        if (now_fb - last_fb >= std::chrono::seconds(1)) {
+            last_fb = now_fb;
+            const ultramodern::renderer::ViRegs* regs = ultramodern::renderer::get_vi_regs();
+            const uint32_t origin = regs != nullptr ? regs->VI_ORIGIN_REG : 0u;
+            uint64_t nonzero = 0, hash = 1469598103934665603ull;
+            if (origin != 0 && app != nullptr && app->core.RDRAM != nullptr) {
+                const uint8_t* fb = app->core.RDRAM + (origin & 0x3FFFFFF);
+                for (uint32_t i = 0; i < 320 * 240 * 2; ++i) {
+                    if (fb[i] != 0) ++nonzero;
+                    hash = (hash ^ fb[i]) * 1099511628211ull;
+                }
+            }
+            std::fprintf(stderr, "[rayman2] fb origin=0x%08X nonzero=%llu hash=%016llx\n",
+                         origin, (unsigned long long)nonzero, (unsigned long long)hash);
+
+            // Write the raw framebuffer out so it can actually be looked at.
+            //
+            // Nothing else in this port can answer "what is on the screen". The
+            // counters say a display list was submitted, not what it drew, and
+            // a black window is equally consistent with the game drawing
+            // nothing and with the port failing to present what it drew. The
+            // bytes settle it; tools/fb_to_png.py makes them viewable.
+            if (origin != 0 && app != nullptr && app->core.RDRAM != nullptr) {
+                if (std::FILE* f = std::fopen("fb_dump.bin", "wb")) {
+                    std::fwrite(app->core.RDRAM + (origin & 0x3FFFFFF), 1, 320 * 240 * 2, f);
+                    std::fclose(f);
+                }
+            }
+        }
+    }
+
     app->updateScreen();
 }
 
