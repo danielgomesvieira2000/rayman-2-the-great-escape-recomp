@@ -2,8 +2,8 @@
   "inputs": {
     "rom.z64": "e9a71380b43e25b9",
     "recomp/rayman2.us.yaml": "7b07d8a273e15858",
-    "recomp/rayman2.us.toml": "e49b4c14072d447c",
-    "recomp/symbol_addrs.txt": "41bd9096e0b4bcd5",
+    "recomp/rayman2.us.toml": "d471a5830e264bbe",
+    "recomp/symbol_addrs.txt": "cf62c26633e8c674",
     "recomp/macro.inc": "5e4a2b83a686891b"
   },
   "derived": {
@@ -12,16 +12,16 @@
     "recomp/undefined_syms_auto.txt": "e0e789c49da6bfde",
     "recomp/undefined_funcs_auto.txt": "3d68f0e36bd2c110",
     "recomp/rayman2.us.ld": "97a2e8a89bdc4e7e",
-    "elf/rayman2.us.elf": "4a30efd9088820c0"
+    "elf/rayman2.us.elf": "34089f1a2fa4bea7"
   },
   "outputs": {
     "asm": {
-      "hash": "b1d1e8652afb76fd",
+      "hash": "416b41b731abd8dc",
       "files": 7
     },
     "RecompiledFuncs": {
-      "hash": "0f2ff18c75bc3a0f",
-      "files": 69
+      "hash": "dab10b8fe2a5a3fd",
+      "files": 68
     }
   }
 }

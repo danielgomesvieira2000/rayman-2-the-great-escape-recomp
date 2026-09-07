@@ -60,6 +60,14 @@ void rayman2_debug_node(uint8_t* rdram, uint32_t node_addr);
 void rayman2_debug_assert(uint8_t* rdram, uint32_t ra);
 void rayman2_debug_site(uint8_t* rdram, uint32_t site);
 void rayman2_debug_flag(uint8_t* rdram, uint32_t addr, uint32_t loaded);
+void rayman2_debug_count(uint8_t* rdram, uint32_t site);
+
+// Defined in src/register_sections.cpp; called from a hook on the boot thread
+// so that it runs after librecomp's init() has cleared and repopulated the
+// function map. See that file for why the runtime's own pass gets two of the
+// three sections wrong.
+void rayman2_register_static_sections(void);
+
 
 #ifdef __cplusplus
 }

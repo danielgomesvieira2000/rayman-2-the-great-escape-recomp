@@ -20,6 +20,11 @@
 // lands 4 GB away.
 
 #include <cstdint>
+#include <chrono>
+
+// A newline in a string literal, spelled so that generated-source tooling
+// cannot turn the escape into a real line break.
+#define NL "\n"
 #include <cstdio>
 
 #include "recomp.h"
@@ -91,7 +96,7 @@ extern "C" void rayman2_debug_assert(uint8_t* rdram, uint32_t ra) {
 // site announces itself.
 extern "C" void rayman2_debug_site(uint8_t* rdram, uint32_t site) {
     static int seen = 0;
-    if (seen >= 12) {
+    if (seen >= 64) {
         return;
     }
     ++seen;
@@ -128,4 +133,64 @@ extern "C" void rayman2_debug_flag(uint8_t* rdram, uint32_t addr, uint32_t loade
                      (uint32_t)MEM_W(0x0, a), (uint32_t)MEM_W(0x4, a),
                      (uint32_t)MEM_W(0x8, a), (uint32_t)MEM_W(0xC, a));
     }
+}
+
+// Count visits to a site rather than announcing the first one.
+//
+// rayman2_debug_site answers "was this reached", which is the right question
+// for a linear boot path and the wrong one for a loop: the game's main loop is
+// a pair of nested while loops, and what matters is which of its five points
+// are still being reached and how often. A first-hit report says only that the
+// loop was entered; a rate says whether it is turning, which arm it is in, and
+// whether it has stopped.
+extern "C" void rayman2_debug_count(uint8_t* rdram, uint32_t site) {
+    (void)rdram;
+    static uint32_t sites[64];
+    static unsigned long long hits[64];
+    static int used = 0;
+    static std::chrono::steady_clock::time_point last = std::chrono::steady_clock::now();
+
+    // Log every one of the first calls verbatim, with a sequence number and a
+    // millisecond timestamp.
+    //
+    // Summaries alone proved ambiguous: counts that stay at one with a quarter
+    // second between visits fit both "the loop turned once and stopped" and
+    // "each callee is taking a quarter second", and those call for opposite
+    // investigations. A raw trace distinguishes them without inference.
+    static unsigned long long seq = 0;
+    static const std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+    if (seq < 400) {
+        const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - t0).count();
+        std::fprintf(stderr, "[rayman2] trace %llu  %08X  +%lldms" NL, seq, site, ms);
+    }
+    ++seq;
+
+    int i = 0;
+    for (; i < used; ++i) {
+        if (sites[i] == site) break;
+    }
+    if (i == used) {
+        if (used == 64) return;
+        sites[used] = site;
+        hits[used] = 0;
+        ++used;
+        // Announce a site the first time it is seen. Without this a loop that
+        // is entered once and then blocks reports nothing at all, because the
+        // periodic summary below only runs on a later hit -- silence that reads
+        // identically to "never reached".
+        std::fprintf(stderr, "[rayman2] loop: first visit to %08X\n", site);
+    }
+    ++hits[i];
+
+    const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+    if (now - last < std::chrono::milliseconds(250)) {
+        return;
+    }
+    last = now;
+    std::fprintf(stderr, "[rayman2] loop:");
+    for (int j = 0; j < used; ++j) {
+        std::fprintf(stderr, "  %08X=%llu", sites[j], hits[j]);
+    }
+    std::fprintf(stderr, "\n");
 }

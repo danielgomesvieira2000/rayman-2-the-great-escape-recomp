@@ -50,7 +50,14 @@ std::atomic<bool> g_running{false};
 std::thread g_sampler;
 
 // How far up a blocked thread's stack to look for return addresses.
-constexpr size_t kStackWords = 256;
+//
+// 256 words (2 KB) was enough while the failure was in boot scaffolding, and
+// stopped being enough as soon as the game itself started running: recompiled
+// functions carry the whole MIPS frame plus a recomp_context, so a chain ten
+// deep buries the frames that matter well past 2 KB. A pass at that size
+// reported only the idle thread and no game code at all, which reads as "the
+// game is nowhere" rather than "the window was too small".
+constexpr size_t kStackWords = 8192;
 
 // True if the address belongs to our own executable rather than a system DLL.
 bool in_main_module(const void* addr, HMODULE main_module) {
@@ -180,7 +187,7 @@ void report(uint64_t rounds, uint64_t parked,
                  (unsigned long long)rounds, (unsigned long long)running,
                  (unsigned long long)parked);
     report_table("executing", executing, 6);
-    report_table("return addresses on parked stacks", on_stacks, 10);
+    report_table("return addresses on parked stacks", on_stacks, 40);
 }
 
 } // namespace

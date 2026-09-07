@@ -275,6 +275,20 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
     if (keys[SDL_SCANCODE_I]) ay += 1.0f;
     if (keys[SDL_SCANCODE_K]) ay -= 1.0f;
 
+    // Diagnostic: hold A and Start when RAYMAN2_AUTOPRESS is set.
+    //
+    // The bring-up runs launch the game and read its log, and nobody is at the
+    // keyboard. That is fine until the game reaches a screen that waits for a
+    // button, at which point "waiting for the player" and "hung" look exactly
+    // the same from outside -- which is what happened: a loop polling for A or
+    // Start read as a hang for several rounds of bisection.
+    //
+    // Holding the buttons is wrong for anything that wants an edge rather than
+    // a level, so this is opt-in and never on by default.
+    if (std::getenv("RAYMAN2_AUTOPRESS") != nullptr) {
+        held |= 0x8000 | 0x1000;   // A and Start
+    }
+
     *buttons = held;
     *x = ax;
     *y = ay;
@@ -285,10 +299,24 @@ void set_rumble(int, bool) {
     // No rumble: port 1 advertises a Controller Pak, not a Rumble Pak.
 }
 
+// Report a plain controller in port 1 and nothing in the others.
+//
+// This deliberately does NOT advertise a Controller Pak, and the reason is
+// consistency rather than preference. What this returns feeds
+// __osContGetInitData, which sets the status byte the game reads as "a pak is
+// present"; but every Pfs entry point in librecomp answers PFS_ERR_NOPACK,
+// which is the console's answer when the slot is empty. Claiming a pak here
+// tells the game to go and use one that the runtime will then deny it, and a
+// game that trusts its own query has no reason to give up -- it waits for a
+// pak it has been told is there.
+//
+// Saying "no pak" is a state the shipped game had to handle, because a player
+// can always run it without one. When the Pfs side is actually implemented,
+// this is the line to change back, and the two must change together.
 ultramodern::input::connected_device_info_t get_connected_device_info(int controller_num) {
     if (controller_num == 0) {
         return { ultramodern::input::Device::Controller,
-                 ultramodern::input::Pak::ControllerPak };
+                 ultramodern::input::Pak::None };
     }
     return { ultramodern::input::Device::None, ultramodern::input::Pak::None };
 }

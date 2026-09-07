@@ -286,3 +286,264 @@ osCreateViManager = 0x80007D10; // type:func
 // oblige this port to drive the PI registers itself. Naming the public creator
 // hands the whole manager -- thread, queue and DMA -- to librecomp instead.
 osCreatePiManager = 0x8000B190; // type:func
+
+// osPiStartDma -- the reason the port booted to a black screen for so long.
+//
+// The boot thread loads the main and aux segments by calling a wrapper
+// (func_800026D8) that issues a PI DMA and then blocks in osRecvMesg waiting
+// for the completion message. The probe sweep showed the thread entering that
+// wrapper and never leaving it: the DMA never completed, so the main segment
+// -- where the game and all of its graphics live -- was never in RAM, and
+// nothing was ever submitted to the renderer.
+//
+// The cause is the seam between the game's libultra and the runtime's. This
+// function is the real libultra osPiStartDma: it fills in an OSIoMesg and posts
+// it to the PI manager's command queue, expecting the PI manager thread to pick
+// it up, drive the registers and reply. But osCreatePiManager is reimplemented
+// by librecomp (see above), so the game's PI manager thread does not exist. The
+// message landed in a queue with no reader and the caller waited forever.
+//
+// osPiStartDma is in N64Recomp's reimplemented set, and elf.cpp checks that set
+// before the ignored one, so naming it here replaces the body wholesale with
+// librecomp's: that one performs the copy immediately and posts the completion
+// message to the caller's own return queue, which is what unblocks osRecvMesg.
+//
+// Identified from the body rather than guessed. It writes message type 11 for
+// direction 0 and 12 otherwise -- OS_MESG_TYPE_DMAREAD and DMAWRITE -- then
+// fills 0x2/0x4/0x8/0xC/0x10/0x14 with priority, retQueue, dramAddr, devAddr,
+// size and a NULL piHandle, which is the OSIoMesg layout field for field, and
+// finally jams or sends depending on whether priority is OS_MESG_PRI_HIGH.
+// librecomp's version reads dramAddr, size and the queue from sp+0x10, +0x14
+// and +0x18, matching the wrapper's stack arguments exactly.
+osPiStartDma = 0x8000BB80; // type:func
+
+// osContInit -- the controller API, and the second seam of the same kind.
+//
+// With the PI DMA fixed the boot thread got as far as the aux segment, which
+// calls this during early init. It crashed writing to 0xA4800000: the game's
+// own libultra was driving the Serial Interface registers directly, and MMIO is
+// not RDRAM, so the recompiler's memory macro resolved it to 0x24800000 bytes
+// past the base -- inside the guard region the port maps after RDRAM, which is
+// exactly why that region is mapped NOACCESS rather than left unreserved.
+//
+// The crash stack named the caller chain outright: func_80000854 (boot thread)
+// -> func_800F69EC (aux segment init) -> this -> __osSiRawStartDma. Note that
+// the return-address trick used earlier does NOT work for this: N64Recomp emits
+// `jal` as a plain C call and never assigns ctx->r31, so $ra reads 0 in every
+// recompiled function. The native call stack is the caller chain here.
+//
+// Identified from the body: it guards on a one-shot flag, creates the SI event
+// message queue, registers an event handler, packs a request, issues a write
+// DMA and a read DMA to the PIF with an osRecvMesg after each, unpacks the
+// init data and creates the SI access queue. That is osContInit instruction
+// for instruction.
+//
+// librecomp reimplements it against the host's input, so naming it replaces the
+// whole PIF conversation with something the runtime can actually answer.
+osContInit = 0x80008B10; // type:func
+
+// The rest of the public controller API, named together.
+//
+// Naming osContInit alone moved the crash one function along, to the next
+// routine that talks to the PIF. These three are the remainder of the surface
+// the aux segment's init actually uses, and they have to be replaced as a set:
+// librecomp's osContStartReadData does not fill the game's __osContPifRam
+// buffer at 0x800207C0, so leaving the matching reader as game code would have
+// it unpack a buffer nobody writes -- a controller that reads as permanently
+// idle, which is worse than a crash because it looks like it works.
+//
+// osContStartReadData (0x800087F0): takes the SI access semaphore, and if the
+// last command was not already a button read, packs one and issues a write DMA
+// followed by a blocking osRecvMesg; then issues the read DMA, records the last
+// command and releases the semaphore.
+//
+// osContGetReadData (0x80008878): no DMA at all -- it walks __osMaxControllers
+// entries of __osContPifRam eight bytes at a time, pulls the error code out of
+// bits 0xC0 shifted right by four, and stores the button halfword and the two
+// stick bytes into the caller's OSContPad array.
+//
+// osContStartQuery (0x80008750): the same shape as StartReadData but packing a
+// status request instead, and clearing the last-command byte rather than
+// setting it.
+//
+// Along the way this also identifies, but deliberately does not name, the
+// private helpers they share: func_800116D4 and func_80011740 are the SI access
+// acquire/release pair, func_80008914 packs a read command and func_80008D60
+// packs a request. Those are in the recompiler's ignored set, so naming any of
+// them would oblige this port to implement it; replacing their public callers
+// means nothing ever reaches them.
+osContStartQuery    = 0x80008750; // type:func
+osContStartReadData = 0x800087F0; // type:func
+osContGetReadData   = 0x80008878; // type:func
+
+// osPfsInitPak -- the Controller Pak probe, and the third seam of the same kind.
+//
+// Same failure signature as the controller API: a write 0x24800000 bytes past
+// the RDRAM base, which is game address 0xA4800000, the SI registers. The
+// crash stack read func_80000854 -> here -> func_8000A6B0 -> __osSiRawStartDma,
+// so this is the routine that goes out over the SI to ask whether a pak is
+// present.
+//
+// Identified from the structure it fills rather than from the call. It takes
+// the SI access semaphore, performs a raw pak read, releases it, then writes
+// the caller's struct at 0x0, 0x4 and 0x8, at 0x4C, 0x50 and 0x54, and single
+// bytes at 0x64 and 0x65. That is OSPfs field for field: status, queue and
+// channel at the front, version, dir_size and inode_table in the middle, and
+// the bank count and active bank at the end.
+//
+// librecomp answers PFS_ERR_NOPACK to every Pfs entry point, which is not a
+// stub in the sense of being unfinished -- it is the answer the console gives
+// when no Controller Pak is inserted, and a game that shipped had to handle it.
+// So the game takes a path it was always able to take.
+osPfsInitPak = 0x8000A320; // type:func
+
+// osSetIntMask -- the fourth seam, and the first one reached from real game code.
+//
+// The crash chain for this one runs ten frames deep and starts in the main
+// segment: func_80025D30 -> func_800AD5B8 -> func_800B4D80 -> func_800B8124 ->
+// func_800B8628 -> func_800B358C -> func_800B3044 -> func_80006F30 -> here.
+// That is the game proper, not boot scaffolding, which is why it only became
+// reachable once the section registration above was fixed.
+//
+// The fault was a read of 0xA430000C, MI_INTR_MASK. Identified from the body:
+// it reads cop0 Status directly, folds in the complement of __OSGlobalIntMask,
+// reads the MI interrupt mask to reconstruct the previous OSIntMask for the
+// return value, then writes a new MI mask looked up from a table indexed by the
+// requested bits before setting Status. That is osSetIntMask exactly, and no
+// other libultra routine both reads and writes MI_INTR_MASK around a Status
+// update.
+//
+// It is in the reimplemented set, so librecomp owns interrupt masking -- which
+// it must, having replaced the interrupt model wholesale. Note that osGetIntMask
+// is in the ignored set only, so it stays game code; nothing here calls it.
+osSetIntMask = 0x8000CE00; // type:func
+
+// The video interface, and the two routines that submit RSP tasks.
+//
+// With the seams above closed the game reaches its own main loop, at
+// func_80026B08, and stays there -- no crash, no hang in boot, and still not a
+// single display list. That is the signature of a game running correctly and
+// talking to hardware nobody is listening to.
+//
+// All seven are in the recompiler's reimplemented set, and every one of them is
+// a place where the game's own libultra would write a register or set a bit in
+// a structure that only the real VI and RSP ever read.
+//
+// The five VI entry points were identified through the context pointer they
+// share, D_8001B634, which is __osViNext. Their offsets into it are the
+// __OSViContext layout: state at 0x0, framep at 0x4, modep at 0x8, control at
+// 0xC and y_scale at 0x24.
+//
+//   osViSetMode (0x800080A0)            stores the mode pointer at 0x8, sets
+//                                       state to 1 and copies the mode's
+//                                       control word into 0xC.
+//   osViSetSpecialFeatures (0x800080F0) walks the feature bits of its argument
+//                                       and ORs matching bits into control.
+//   osViSetYScale (0x80008260)          stores its float argument at 0x24 and
+//                                       ORs 0x4 into state.
+//   osViSwapBuffer (0x800082B0)         stores the framebuffer at 0x4 and ORs
+//                                       0x10 into state. This is the one that
+//                                       makes a frame appear, and as game code
+//                                       it was setting a bit nothing read.
+//   osViBlack (0x800085F0)              sets or clears state bit 0x20 according
+//                                       to its byte argument.
+//
+// osSpTaskLoad (0x80007A20) is unmistakable: it calls osVirtualToPhysical seven
+// times, once for each pointer field of an OSTask, writes back the data cache,
+// and then moves the microcode and the task structure into IMEM at 0x04001000
+// and DMEM at 0x04000FC0. osSpTaskStartGo (0x80007C2C) is the short companion
+// that releases the halt.
+//
+// Their callers are func_8008F378, func_8008F4F4 and func_800AEB04 -- main
+// segment game code, which is to say the graphics submission path itself.
+osSpTaskLoad           = 0x80007A20; // type:func
+osSpTaskStartGo        = 0x80007C2C; // type:func
+osViSetMode            = 0x800080A0; // type:func
+osViSetSpecialFeatures = 0x800080F0; // type:func
+osViSetYScale          = 0x80008260; // type:func
+osViSwapBuffer         = 0x800082B0; // type:func
+osViBlack              = 0x800085F0; // type:func
+
+// osViSetEvent -- where the game asks to be told about vertical retrace.
+//
+// Naming the VI and RSP entry points above was necessary and not sufficient:
+// the game still sat in its main loop drawing nothing. This is why. A game's
+// frame loop is paced by retrace -- it registers a message queue here and then
+// blocks on it once per frame -- and as game code this routine only wrote the
+// queue pointer into a structure in RDRAM. ultramodern's VI thread posts to the
+// queue it was told about through its own osViSetEvent, was never told about
+// any, and so posted nothing. The loop waited for a frame boundary that could
+// never arrive, which is exactly what "no crash, no hang in boot, 60 VI fps and
+// zero display lists" looks like from the outside.
+//
+// Identified by its three arguments landing at 0x10, 0x14 and 0x2 of
+// __osViNext: the message queue, the message, and the retrace count as a
+// halfword. Note the neighbouring func_80008300 also uses that context but
+// reads VI_CURRENT_REG at 0xA4400010 -- that is __osViSwapContext, the interrupt
+// side, which is private and stays game code because nothing will call it.
+osViSetEvent = 0x80008040; // type:func
+
+// osSetEventMesg -- the registration every other event fix was standing in for.
+//
+// The bisection that found this ran eight levels deep, from the game's main
+// loop down to func_8009F898, which does:
+//
+//     osRecvMesg(&D_800F5C04, ...)        // take the controller lock
+//     osContStartQuery(&D_800CF378)
+//     osRecvMesg(&D_800CF378, ...)        // wait for the SI to finish
+//
+// and never came back from that second wait. The queue it blocks on is not the
+// one it handed osContInit, so nothing the port had done so far could deliver
+// to it. func_8009F478 is where it is registered:
+//
+//     osSetEventMesg(5 /* OS_EVENT_SI */, &D_800CF378, NULL)
+//
+// As game code that call only wrote a pointer into __osEventStateTab, a table
+// in RDRAM that the port's runtime has no reason to read. ultramodern keeps its
+// own event table and posts SI completions to whatever was registered through
+// its osSetEventMesg -- which, until now, was nothing.
+//
+// Identified from the body: it shifts the event id left by three, adds it to a
+// table at D_80025378, and stores the queue at +0 and the message at +4 with
+// interrupts disabled. Eight-byte entries indexed by event id is
+// __osEventStateTab, and no other routine writes it.
+//
+// This also supersedes the narrower fix in the fork's osContInit, which
+// registered the queue passed to it so that the boot-time query had somewhere
+// to land. That stays -- it is correct on its own terms and covers a game that
+// never calls osSetEventMesg -- but the game does call it, later and with a
+// different queue, and that registration now wins as it should.
+osSetEventMesg = 0x80004220; // type:func
+
+// The audio interface, reached once a second game thread started running.
+//
+// Naming osSetEventMesg unblocked the controller query, and the first thing
+// that happened afterwards was a fault on a thread that had never got off the
+// ground before: func_8008F5C0 -> func_800AEEF8 -> func_800AEE00 -> here. The
+// address was 0xA4500004, AI_LEN.
+//
+// osAiGetLength (0x80007840) is four instructions and reads that register and
+// nothing else. osAiSetNextBuffer (0x80007980) is the writer: it carries
+// libultra's workaround for a buffer that would cross a 0x2000 boundary,
+// polls the busy bit, and then stores the DRAM address and the length to
+// 0xA4500000 and 0xA4500004.
+//
+// The busy poll itself, func_800112F0, reads AI_STATUS at 0xA450000C and tests
+// the sign bit -- __osAiDeviceBusy. It is in the ignored set and stays game
+// code, which is safe precisely because replacing its only caller means nothing
+// reaches it.
+osAiGetLength     = 0x80007840; // type:func
+osAiSetNextBuffer = 0x80007980; // type:func
+
+// osContGetQuery -- the reader half of the query, left behind by mistake.
+//
+// osContStartQuery was named earlier; this is its partner, and the same
+// argument applies to it as applied to osContGetReadData: librecomp's
+// osContStartQuery does not fill the game's __osContPifRam, so leaving the
+// reader as game code has it unpack a buffer nobody writes. The game asks
+// whether a controller is present and gets whatever happens to be in memory.
+//
+// It is four instructions -- it moves its OSContStatus argument to the second
+// parameter and tail-calls __osContGetInitData (func_80008CAC) with a scratch
+// byte for the bit pattern -- which is osContGetQuery exactly.
+osContGetQuery = 0x800087D0; // type:func

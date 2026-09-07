@@ -690,3 +690,109 @@ rest of the hooks; `recomp/rayman2.us.toml` documents how to put one back.
   audio tasks complete without synthesising anything. That is phase 05.
 - **`__osGetSR` returning 0** remains an unexamined approximation now that real
   game code is executing.
+
+## Why no display lists were submitted
+
+The question turned out to have not one answer but a series of them, all the
+same shape. The recompiler replaces libultra function by function, matching on
+symbol *name*; every libultra routine this port had not yet named stayed as
+recompiled game code, and recompiled game code that writes a hardware register
+writes to an address the runtime does not model. Each such routine is a seam,
+and each seam had to be found by asking the running program rather than by
+reading.
+
+The chain, in the order it was found:
+
+1. **osPiStartDma (0x8000BB80).** The boot thread loaded the main and aux
+   segments through a wrapper that starts a PI DMA and blocks in `osRecvMesg`.
+   As game code that routine posted an OSIoMesg to the PI manager's command
+   queue -- but `osCreatePiManager` is librecomp's, so the game's manager thread
+   did not exist and nothing ever read the queue. The boot thread waited
+   forever, the main segment was never in RAM, and nothing could be drawn.
+
+2. **osContInit, osContStartQuery, osContStartReadData, osContGetReadData,
+   osContGetQuery.** The aux segment's init talks to the PIF. As game code that
+   meant writing 0xA4800000, which resolves 0x24800000 bytes past the RDRAM base
+   -- inside the guard region, which is why it faults rather than corrupting
+   silently. The reader halves had to be replaced alongside the starters:
+   librecomp does not fill the game's `__osContPifRam`, so a game-code reader
+   unpacks a buffer nobody writes, which looks like a controller that is
+   permanently idle -- worse than a crash.
+
+3. **osPfsInitPak (0x8000A320).** Same fault, same cause, on the Controller Pak
+   probe.
+
+4. **Static section registration.** librecomp fills its address-to-function map
+   only from `load_overlays(0x1000, entrypoint, 1 MB)`, deriving each section's
+   RAM address from its ROM offset. That is right for boot and wrong for the
+   other two, which the game DMAs itself to fixed addresses. Direct calls
+   between recompiled functions are ordinary C calls and never consult the map,
+   so the whole main segment ran correctly until the first *indirect* call into
+   it. Fixed in `src/register_sections.cpp`, called from the port's one
+   remaining hook.
+
+5. **osSetIntMask (0x8000CE00).** The first seam reached from real game code,
+   ten frames deep in the main segment.
+
+6. **osSpTaskLoad, osSpTaskStartGo, osViSetMode, osViSetSpecialFeatures,
+   osViSetYScale, osViSwapBuffer, osViBlack.** The submission and video paths.
+   As game code, `osViSwapBuffer` set a bit in a structure nothing read.
+
+7. **osViSetEvent (0x80008040) and osSetEventMesg (0x80004220).** The
+   registrations. A frame loop is paced by retrace and the controller code
+   blocks on SI completion; both ask to be told through a queue, and as game
+   code both only wrote a pointer into a table in RDRAM. ultramodern keeps its
+   own event table and posted to what it had been told about, which was nothing.
+   `osSetEventMesg` is the general case and supersedes the narrower fix made in
+   the runtime fork's `osContInit`.
+
+8. **osAiGetLength, osAiSetNextBuffer.** Reached only once the previous fix let
+   a second game thread start.
+
+Two changes were made in the runtime fork (`lib/N64ModernRuntime`, branch
+`controller-pak`): `osContInit` now registers the queue it is passed for
+OS_EVENT_SI, and `send_si_message` refuses to enqueue when no queue is
+registered rather than handing `do_send` a null pointer to fault on.
+
+One port-side inconsistency was corrected: `get_connected_device_info` had been
+advertising a Controller Pak in port 1 while every librecomp Pfs entry point
+answers `PFS_ERR_NOPACK`. The game was being told a pak was present and then
+denied it. It now reports no pak, which is a state the shipped game had to
+handle; the two must change together if pak support is implemented.
+
+### Where it stands
+
+The game now boots, loads its segments, runs its own `main`, reaches its main
+loop, starts a second thread, and submits an RSP audio task -- which the port
+answers with the deliberate stub from `src/rsp.cpp`, since the audio microcode
+is phase 05. Nothing crashes and nothing hangs in the runtime.
+
+It still submits no *graphics* task. The main thread is inside its state-entry
+chain, in a wait loop at func_800A1190 that spins until func_800A3878 returns
+0x7FFE. Read at runtime, the code it actually gets is 0x1004, with
+`D_800C9520` = 1 and `D_800C952C` = 1 -- so the subsystem is initialised and
+the channel is enabled, and the check that fails is the last one: the
+descriptor at `D_800CF624[0]` carries a capability count in its halfword at
+offset 6 that is too small for the requested bit. That descriptor is allocated
+and filled in func_800A2AD0 by way of the func_8008xxxx audio library, which is
+where the next round should start.
+
+### Method
+
+Two instruments did nearly all the work, and both are in the tree:
+
+- `rayman2_debug_count` in `src/debug_node.cpp`, driven by `[[patches.hook]]`
+  probes on call sites. Bisecting a call chain one function at a time, with one
+  probe per call, located each blocker in a few minutes without any guessing
+  about which callee mattered.
+- The crash reporter's stack walk plus `llvm-symbolizer` against the
+  RelWithDebInfo build, which turns a faulting address into the full recompiled
+  call chain and named the caller outright several times.
+
+Two lessons are worth carrying forward. First, `$ra` is useless for identifying
+callers here: N64Recomp emits `jal` as a plain C call and never assigns
+`ctx->r31`, so it reads 0 in every recompiled function -- the native call stack
+is the caller chain. Second, an instrument that only reports periodically
+cannot distinguish "stopped" from "slow", and both readings send you somewhere
+different; the raw per-call trace with timestamps settled in one run what two
+rounds of summaries had left ambiguous.

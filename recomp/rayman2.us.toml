@@ -93,7 +93,8 @@ stubs = [
 # cross-compilation, no separate ELF, no reference symbol tables. It is by far
 # the cheapest way to ask the running game a question.
 #
-#   [[patches.hook]]
+#   
+
 #   func = "func_800004C0"
 #   before_vram = 0x800006A4
 #   text = "rayman2_debug_flag(rdram, 0x800250D8u, (uint32_t)ctx->r2);"
@@ -111,3 +112,18 @@ stubs = [
 #     thread's idle spin and dominated a profile completely once the thread
 #     started idling correctly.
 # ---------------------------------------------------------------------------
+
+
+# Put the main and aux sections into librecomp's function map at the addresses
+# they actually occupy.
+#
+# This is the one hook the port needs in normal operation; every other hook in
+# this file during phase 04 was a probe and has been removed now that it has
+# answered. It must run on the game thread and after the runtime's init(),
+# which clears the map and refills it from the IPL3 window alone, getting two
+# of the three sections wrong. The boot thread's entry is the first point that
+# satisfies both. See src/register_sections.cpp for the full reasoning.
+[[patches.hook]]
+func = "func_80000854"
+at_func_start = true
+text = "rayman2_register_static_sections();"
