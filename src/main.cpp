@@ -244,6 +244,23 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
     }
 
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
+
+    // Report the first call, and say whether SDL gave us a keyboard at all.
+    //
+    // Returning false here is not a quiet no-op: librecomp's
+    // osContGetReadData_recomp only copies the pad into RDRAM when err_no is 0,
+    // and err_no is only 0 when this returns true. So a null keyboard state
+    // means the game's pad is never written and every button reads as released
+    // -- indistinguishable, from inside the game, from a player sitting still.
+    {
+        static bool reported = false;
+        if (!reported) {
+            reported = true;
+            std::fprintf(stderr, "[rayman2] first get_input: keyboard state %s\n",
+                         keys == nullptr ? "NULL (no input will reach the game)" : "present");
+        }
+    }
+
     if (keys == nullptr) {
         return false;
     }
@@ -286,7 +303,19 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
     // Holding the buttons is wrong for anything that wants an edge rather than
     // a level, so this is opt-in and never on by default.
     if (std::getenv("RAYMAN2_AUTOPRESS") != nullptr) {
-        held |= 0x8000 | 0x1000;   // A and Start
+        // Pulse rather than hold.
+        //
+        // The game does not test whether a button is down, it tests whether it
+        // was newly pressed: func_800A3878 compares the current sample against
+        // the previous entry in a ring and requires the bit to be absent there.
+        // A permanently held button therefore produces exactly one edge, at
+        // whatever moment sampling starts, and none afterwards -- so the first
+        // version of this looked identical to no input at all.
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch()).count();
+        if ((ms / 250) % 2 == 0) {
+            held |= 0x8000 | 0x1000;   // A and Start
+        }
     }
 
     *buttons = held;

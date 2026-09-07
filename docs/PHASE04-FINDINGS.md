@@ -796,3 +796,71 @@ is the caller chain. Second, an instrument that only reports periodically
 cannot distinguish "stopped" from "slow", and both readings send you somewhere
 different; the raw per-call trace with timestamps settled in one run what two
 rounds of summaries had left ambiguous.
+
+## The wait was the game's own save prompt
+
+The previous section ended by naming a wait loop at func_800A1190 and reporting
+that func_800A3878 was failing with 0x1004. **That reading was wrong**, and the
+way it was wrong is worth recording: 0x1004 was read out of `D_800CF620`, which
+is a shared last-error global, not this call's result. It had been left there by
+an unrelated caller. Reading a global that any code may write and attributing it
+to the call in front of you is the same mistake as trusting `$ra` -- plausible,
+cheap, and not evidence. Hooking the function's own return register settled it
+in one run.
+
+What the routine is actually doing became obvious once the game was asked
+instead of read. func_80090BB8 formats the game's own messages, and a hook on
+the point where it receives the text pointer prints them:
+
+    "=and press the #5/5/31#$# Button."
+    "=to continue without saving."
+
+This is the Controller Pak save prompt. The game is not hung in the runtime; it
+has stopped to ask the player a question, and it has been sitting there for
+every run since the event queues were fixed.
+
+### What that ruled out, and what it ruled in
+
+The whole libultra input path is exonerated, by measurement rather than by
+argument. With a key held, the OSContPad that librecomp writes at `D_800CF590`
+reads 0x9000, the game's own copy at `D_800CF370` reads 0x9000, and the poll
+chain -- func_80082E5C -> func_800A24B0 -> func_800A3BB0 -> func_8009FF70 ->
+func_8009F38C, with the controller thread func_8009F2A0 on the other end --
+turns 2.4 million times in fourteen seconds. Buttons reach RDRAM correctly.
+
+Two real defects are left, and both are in the game's own input-binding layer:
+
+1. **func_800A3878 tests a rising edge, not a level.** It requires the bit to be
+   present in the current sample and absent from the previous entry of a
+   sixteen-byte ring at `D_800CF6A4[port]`. A permanently held button therefore
+   produces exactly one edge, at whatever moment sampling begins, and none
+   afterwards. The first version of the RAYMAN2_AUTOPRESS diagnostic held the
+   buttons down and so looked identical to no input at all; it now pulses at
+   4 Hz, which is the correct shape for this test.
+
+2. **The descriptor at `D_800CF664[0]` is not initialised.** It is 0x1C bytes,
+   allocated by func_800A4174 in func_800A2AD0 and stored straight into the
+   table without being cleared. Its supported-button mask at offset 4 reads 0,
+   so `(button & mask) == button` can never hold; and its sample counter at
+   offset 0xE starts from roughly 0xCCCC rather than 0 -- it increments
+   correctly (0xCCCD, 0xCCCE, 0xCCCF ...), so the sampler is running, it is
+   simply counting up from garbage. RDRAM itself is fine: librecomp allocates it
+   with VirtualAlloc(MEM_COMMIT), which is zero-filled, so this fill is the
+   game's own and the mask is being left unwritten rather than clobbered.
+
+An experiment confirmed the diagnosis without leaving anything behind. Patching
+the single instruction at 0x800A3920 (`and $v0, $a1, $v0` -> `or $v0, $a1,
+$zero`) makes the mask test trivially true; with that plus a pulsing press,
+func_800A3878 returns 0x7FFE and the wait at func_800A1190 completes -- the
+game gets past its own save prompt. The patch has been removed. Leaving a
+falsified check in place would make every later observation suspect, for the
+same reason the assert-trap patch was never left in.
+
+So the remaining question is narrow and well posed: what should be writing the
+supported-button mask into `D_800CF664[i]+4`, and why has it not run? The
+descriptor is created in func_800A2AD0 alongside its siblings in `D_800CF624`
+and `D_800CF6A4`, next to calls into the func_8008xxxx library, which is where
+to look next.
+
+The port still submits no graphics task. Nothing crashes, nothing hangs in the
+runtime, and the game is now stopped on a screen it means to be stopped on.

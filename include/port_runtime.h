@@ -61,6 +61,8 @@ void rayman2_debug_assert(uint8_t* rdram, uint32_t ra);
 void rayman2_debug_site(uint8_t* rdram, uint32_t site);
 void rayman2_debug_flag(uint8_t* rdram, uint32_t addr, uint32_t loaded);
 void rayman2_debug_count(uint8_t* rdram, uint32_t site);
+void rayman2_debug_struct(uint8_t* rdram, uint32_t addr, uint32_t words);
+void rayman2_debug_text(uint8_t* rdram, uint32_t addr);
 
 // Defined in src/register_sections.cpp; called from a hook on the boot thread
 // so that it runs after librecomp's init() has cleared and repopulated the

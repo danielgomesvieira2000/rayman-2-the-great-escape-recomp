@@ -194,3 +194,67 @@ extern "C" void rayman2_debug_count(uint8_t* rdram, uint32_t site) {
     }
     std::fprintf(stderr, "\n");
 }
+
+// Dump a game-side structure, once per distinct address.
+//
+// func_800A3878 rejects the request with 0x1004 because the descriptor at
+// D_800CF624[0] carries a capability count in its halfword at offset 6 that is
+// too small for the bit being asked for. Two very different things produce
+// that: a descriptor that was never populated, which reads as zeros, and one
+// that was populated from data saying a genuinely small number. Reading the
+// bytes distinguishes them; reasoning about the loader cannot.
+extern "C" void rayman2_debug_struct(uint8_t* rdram, uint32_t addr, uint32_t words) {
+    static uint32_t seen[8];
+    static int used = 0;
+    for (int i = 0; i < used; ++i) {
+        if (seen[i] == addr) return;
+    }
+    if (used == 8) return;
+    seen[used++] = addr;
+
+    if (addr == 0) {
+        std::fprintf(stderr, "[rayman2] struct: NULL" NL);
+        return;
+    }
+    const gpr base = (gpr)(int32_t)addr;
+    std::fprintf(stderr, "[rayman2] struct at 0x%08X:" NL, addr);
+    for (uint32_t i = 0; i < words; i += 4) {
+        std::fprintf(stderr, "[rayman2]   +0x%02X: %08X %08X %08X %08X" NL,
+                     i * 4,
+                     (uint32_t)MEM_W(i * 4 + 0x0, base), (uint32_t)MEM_W(i * 4 + 0x4, base),
+                     (uint32_t)MEM_W(i * 4 + 0x8, base), (uint32_t)MEM_W(i * 4 + 0xC, base));
+    }
+}
+
+// Print a NUL-terminated game string, once per distinct address.
+//
+// The game formats its own messages through func_80090BB8, which fetches the
+// text for an id and then walks it. Reading that text is worth more than
+// another round of bisection: when a program stops to tell the player what is
+// wrong, the fastest way to find out what is wrong is to read what it says.
+//
+// Bytes are fetched one at a time through MEM_BU rather than by casting a
+// pointer, because RDRAM stores each 32-bit word in host order -- byte i of a
+// big-endian word lives at index i^3, which the macro handles and a memcpy
+// would silently get backwards.
+extern "C" void rayman2_debug_text(uint8_t* rdram, uint32_t addr) {
+    static uint32_t seen[16];
+    static int used = 0;
+    if (addr == 0) return;
+    for (int i = 0; i < used; ++i) {
+        if (seen[i] == addr) return;
+    }
+    if (used == 16) return;
+    seen[used++] = addr;
+
+    const gpr base = (gpr)(int32_t)addr;
+    char buf[97];
+    int n = 0;
+    for (; n < 96; ++n) {
+        const uint8_t ch = (uint8_t)MEM_BU(n, base);
+        if (ch == 0) break;
+        buf[n] = (ch >= 0x20 && ch < 0x7F) ? (char)ch : '.';
+    }
+    buf[n] = '\0';
+    std::fprintf(stderr, "[rayman2] text 0x%08X: \"%s\"" NL, addr, buf);
+}
