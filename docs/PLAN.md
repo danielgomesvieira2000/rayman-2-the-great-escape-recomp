@@ -149,10 +149,16 @@ function-entry trace from the start: a debugger over ~20 MB of generated C is
 not a plan, and the sibling ports' `instrument_funcs.py` exists for this.
 
 **Gate:** the Ubisoft logo, then the attract sequence, rendering recognisably.
-*Not met.* The game boots, survives libultra init and runs indefinitely with a
-window open, but renders nothing. Four faults were diagnosed and fixed to get
-there. The working method, and the reason to name public libultra entry points
-rather than emulate the hardware beneath them, are in
+*Met.* The port boots, shows the game's Controller Pak prompt, takes a button
+press and plays the intro cinematic for forty seconds at a sustained 58-61
+display lists a second with no crashes.
+
+Almost every fault was the same one wearing different clothes: a libultra entry
+point left unnamed, so the game drove hardware the runtime does not model. The
+exception took the longest and is a property of the execution model rather than
+of any symbol -- ultramodern's scheduler cannot preempt, so a game thread that
+busy-waits stops the whole program, including delivery of the very event it is
+waiting for. tools/find_spin_loops.py finds that class now. See
 [PHASE04-FINDINGS.md](PHASE04-FINDINGS.md).
 
 ### 05 — Graphics and audio correctness

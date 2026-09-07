@@ -158,6 +158,7 @@ endif()
 set(PORT_SOURCES
     src/main.cpp
     src/rsp.cpp
+    RecompiledRsp/rsp_audio.cpp
     src/port_runtime.cpp
     src/register_sections.cpp
     src/spin_yield.cpp
@@ -175,6 +176,20 @@ if(RAYMAN2_ENABLE_FRONTEND)
 else()
     list(APPEND PORT_SOURCES src/rt64_context.cpp)
 endif()
+
+# The recompiled microcode needs SSE4.1.
+#
+# librecomp's RSP vector unit implements the RSP's vector instructions with x86
+# intrinsics, and several of them -- VCL, VMADN and others -- reach for
+# _mm_blendv_epi8, which is SSE4.1. It is an always_inline, so without the
+# feature enabled the build fails rather than falling back to something slower.
+#
+# The flag is applied to this one translation unit rather than to the whole
+# port. Every other object here is either generated MIPS-to-C, which gains
+# nothing from it, or host code where raising the instruction-set floor for the
+# whole executable would be a portability decision made by accident.
+set_source_files_properties(RecompiledRsp/rsp_audio.cpp PROPERTIES
+    COMPILE_OPTIONS "-msse4.1")
 
 add_executable(rayman2-recomp ${PORT_SOURCES})
 

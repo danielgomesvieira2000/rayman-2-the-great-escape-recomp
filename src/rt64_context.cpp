@@ -272,6 +272,15 @@ void RT64Context::send_dl(const OSTask* task) {
     // The game's display list, handed over by librecomp instead of being run on
     // an emulated RSP. Phase 00 established this game uses stock F3DEX.NoN 1.23,
     // which RT64 identifies from the microcode address below.
+    // Report the graphics microcode once, so which GBI RT64 is handed is a
+    // matter of record rather than of phase 00's reading of the ROM.
+    if (n == 1) {
+        std::fprintf(stderr,
+                     "[rayman2] GFX ucode=0x%08X/0x%X data=0x%08X/0x%X boot=0x%08X/0x%X\n",
+                     (unsigned)task->t.ucode, (unsigned)task->t.ucode_size,
+                     (unsigned)task->t.ucode_data, (unsigned)task->t.ucode_data_size,
+                     (unsigned)task->t.ucode_boot, (unsigned)task->t.ucode_boot_size);
+    }
     app->state->rsp->reset();
     app->interpreter->loadUCodeGBI(task->t.ucode & 0x3FFFFFF, task->t.ucode_data & 0x3FFFFFF, true);
     app->processDisplayLists(app->core.RDRAM, task->t.data_ptr & 0x3FFFFFF, 0, true);

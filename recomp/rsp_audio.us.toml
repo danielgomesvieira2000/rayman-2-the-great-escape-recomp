@@ -1,0 +1,34 @@
+# RSPRecomp configuration for Rayman 2's audio microcode.
+#
+# The addresses come from the OSTask the game hands to osSpTaskLoad, reported
+# once by src/rsp.cpp. The task is type 2 (M_AUDTASK) and its microcode lives in
+# the boot segment, which phase 01 mapped as ROM 0x1000 -> VRAM 0x80000400, so
+# a VRAM address maps back to the ROM by subtracting 0x80000400 and adding
+# 0x1000:
+#
+#   ucode_boot  0x80017D90  size 0x00D0  -> ROM 0x18990   (shared)
+#   ucode       0x80017E60  size 0x1000  -> ROM 0x18A60
+#   ucode_data  0x8001BBA0  size 0x0800  -> ROM 0x1C7A0
+#
+# The declared sizes are nominal. Logging the graphics task alongside shows its
+# microcode at 0x80018C80 and its data at 0x8001BE60, immediately after the
+# audio ones, so both 0x1000 and 0x800 overrun into F3DEX:
+#
+#   0x80017D90  shared ucode_boot          0x00D0
+#   0x80017E60  audio text                 0x0E20  <- ends where graphics begins
+#   0x80018C80  graphics text (F3DEX.NoN 1.23)
+#   0x8001BBA0  audio data                 0x02C0
+#   0x8001BE60  graphics data (carries the F3DEX version string at +0x2B0)
+#
+# Recompiling the nominal 0x1000 walked into F3DEX and stopped on its DPC_CURRENT
+# reads at +0xEEC and +0xF00 -- an "Unhandled mfc0: 10" that was a symptom of the
+# wrong length, not of an unsupported instruction. The real extent is 0xE20.
+#
+# text_address is where the RSP runs it, not where it lives in the ROM: task
+# microcode is DMA'd into IMEM, which is 0x04001000.
+text_offset          = 0x18A60
+text_size            = 0xE20
+text_address         = 0x04001000
+rom_file_path        = "/mnt/c/Users/Daniel/claude-projects/n64recomp_rayman_2_greate_escape/rom.z64"
+output_file_path     = "/mnt/c/Users/Daniel/claude-projects/n64recomp_rayman_2_greate_escape/RecompiledRsp/rsp_audio.cpp"
+output_function_name = "rayman2_rsp_audio"
