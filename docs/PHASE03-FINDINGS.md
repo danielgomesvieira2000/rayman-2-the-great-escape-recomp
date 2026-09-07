@@ -1,5 +1,16 @@
 # Phase 03 findings — runtime harness
 
+> **Update: the port now brings RT64 up on its own, without the frontend.**
+> `src/rt64_context.cpp` implements ultramodern's `RendererContext` directly on
+> `RT64::Application`, and a build configured with `-DRAYMAN2_ENABLE_FRONTEND=OFF`
+> reaches `[rayman2] RT64 ready (graphics api 1)` every time. That removes the
+> frontend from the critical path, which is what this phase was blocked on.
+>
+> **The gate is still not met, and one run must not be mistaken for meeting it.**
+> A single run did reach the game — see *One run reached the entrypoint* below —
+> but the current build does not, and I was unable to get back to it. Read that
+> section before trusting anything here.
+
 **Gate NOT met.** The port builds and links into `rayman2-recomp.exe`, RT64
 initialises Direct3D 12 and enumerates the GPU, and then the process dies on the
 renderer thread before the game thread starts. `recomp_entrypoint` has not been
@@ -141,3 +152,97 @@ the recompiler agreeing that nothing here relocates and there are no overlays.
   and gamepads come with the frontend's input tab.
 - **`__osGetSR` returns 0.** Still the first suspect if early execution goes
   astray once the game thread actually starts — see `src/port_runtime.cpp`.
+
+
+---
+
+# Update — writing our own RT64 context
+
+## What it changed
+
+`src/rt64_context.cpp` is the port's own renderer context: RCP register block,
+`RT64::Application` construction, `setup()`, and the nine `RendererContext`
+methods. It is deliberately minimal, and in particular does **not** copy the
+workarounds a mature port accumulates — deferring MSAA to the next launch,
+routing pause state into RT64, choosing a presentation mode. Those are findings
+about other games; copying them here would be untestable until this game renders
+and indistinguishable from deliberate choices afterwards.
+
+With `-DRAYMAN2_ENABLE_FRONTEND=OFF` the port now gets past renderer bring-up
+reliably:
+
+```
+[rayman2] start
+[rayman2] entering recomp::start
+Device Name: Intel(R) Iris(R) Xe Graphics
+[rayman2] RT64 ready (graphics api 1)
+```
+
+This confirms the diagnosis above: the frontend was the blocker, not the game
+path. A sixth directory-scoped RT64 setting turned up on the way —
+`HLSL_CPU`, without which RT64's dual HLSL/C++ headers give a wall of
+`unknown type name 'uint'`.
+
+## One run reached the entrypoint
+
+One run, with the audio-subsystem fix in and launched from a console, produced:
+
+```
+[rayman2] RT64 ready (graphics api 1)
+Initializing recomp heap at offset 0x01000000 with size 0x1F000000
+[rayman2] entering recomp_entrypoint -- the game thread is running
+Failed to find function at 0x80000450
+```
+
+That is the gate's condition, and the failure after it was a good one:
+`0x80000450` is where the entry stub's `jr $t2` goes. splat sizes
+`func_80000400` at `0xC0`, swallowing the function that starts there; because
+the jump is indirect, splat never saw a call to it and started no function, so
+librecomp cannot resolve it at run time.
+
+**But that state is gone and I could not restore it.** Declaring the boundary
+(`func_80000400 size:0x50` plus `func_80000450`) made things worse — an access
+violation *before* the heap is initialised, earlier than the problem being
+fixed. Reverting the declaration did not bring the good state back. Restoring
+`recomp/symbol_addrs.txt` byte-for-byte to its contents at the time of that run
+did not either. The current build fails identically on 4 of 4 and 3 of 3 runs:
+exit `0xC0000005`, never reaching `recomp_entrypoint`.
+
+So the honest position is: the gate was reached once, it is not reached now, and
+the difference is not explained by any source change I can identify. Claiming
+the gate on the strength of that single run would be wrong.
+
+## The real finding: the build is not reproducible
+
+The above is only mysterious because **the generated C cannot be reproduced from
+the committed tree**, and that is a defect in the pipeline rather than a quirk.
+
+`recomp/auto_funcs.txt` and `recomp/ignored_syms.txt` are generated, git-ignored,
+and *fed back into the split*: `auto_funcs.txt` is read by splat on the next run
+and changes which functions exist, and `ignored_syms.txt` is derived from the
+ELF that splat produces. The loop is meant to converge, but nothing pins where
+it converged, and nothing detects it converging somewhere different. Re-running
+the pipeline is therefore not guaranteed to reproduce the previous
+`RecompiledFuncs/`, and when it does not, there is no record of what changed.
+
+That has to be fixed before phase 04, because phase 04 is a bisecting exercise
+and bisecting requires that the same inputs give the same outputs. Concretely:
+
+1. Make `scripts/recompile.sh` record a manifest — hashes of the ELF, of every
+   generated symbol file, and of the generated C — so two runs can be compared.
+2. Decide whether the convergence products belong in the repository after all.
+   They are ROM-derived in the sense that they are addresses measured from the
+   cartridge, which is the same category as the tables already documented in
+   `docs/`, so committing them is defensible and would make the tree
+   self-consistent.
+3. Only then resume boot debugging, with a debugger and a breakpoint rather than
+   by regenerating and re-running.
+
+## Also fixed here
+
+- **SDL's audio subsystem was never initialised.** `create_gfx` brings up video
+  only, so the first `set_frequency` failed with "Audio subsystem is not
+  initialized". It is now initialised lazily on first use.
+- **The entrypoint is wrapped** (`rayman2_entrypoint`) so that crossing into
+  recompiled code is visible in the log rather than inferred. That wrapper is
+  what made the one successful run legible, and it is worth keeping.

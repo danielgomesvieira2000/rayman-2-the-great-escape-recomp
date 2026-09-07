@@ -161,8 +161,15 @@ set(PORT_SOURCES
     src/port_runtime.cpp
     src/register_sections.cpp)
 
+# The renderer context. With the frontend, RecompFrontend owns the RT64
+# application (its menus draw as an overlay and need the render hooks), so the
+# port adapts to its factory. Without it, the port brings RT64 up itself --
+# which is what makes the game bootable with no UI at all, and therefore what
+# makes "does the game run" answerable separately from "do the menus work".
 if(RAYMAN2_ENABLE_FRONTEND)
     list(APPEND PORT_SOURCES src/render_context.cpp)
+else()
+    list(APPEND PORT_SOURCES src/rt64_context.cpp)
 endif()
 
 add_executable(rayman2-recomp ${PORT_SOURCES})
@@ -173,6 +180,13 @@ target_include_directories(rayman2-recomp PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/RecompiledFuncs"
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/N64Recomp/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/RecompFrontend/recompui/include"
+    # RT64 keeps its own include directories PRIVATE, so linking the target does
+    # not bring its headers along; src/rt64_context.cpp includes them directly.
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/RT64/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/RT64/src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/RT64/src/contrib"
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/RT64/src/contrib/hlslpp/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/RT64/src/contrib/dxc/inc"
     ${SDL2_INCLUDE_DIRS})
 
 target_link_libraries(rayman2-recomp PRIVATE
@@ -180,6 +194,14 @@ target_link_libraries(rayman2-recomp PRIVATE
     librecomp
     ultramodern
     rt64)
+
+# RT64's src/shared headers are dual-purpose: the same files are compiled as
+# HLSL and as C++. HLSL_CPU is what makes `uint`, `float3` and `select` resolve
+# to hlslpp's C++ equivalents instead of HLSL builtins. RT64 defines it with
+# add_compile_definitions inside its own directory -- the same directory-scope
+# habit as DXC and the SDL paths -- so any target that includes those headers
+# has to define it too, or it gets a wall of "unknown type name 'uint'".
+target_compile_definitions(rayman2-recomp PRIVATE HLSL_CPU)
 
 if(RAYMAN2_ENABLE_FRONTEND)
     target_compile_definitions(rayman2-recomp PRIVATE RAYMAN2_ENABLE_FRONTEND)
