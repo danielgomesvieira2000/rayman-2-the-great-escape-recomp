@@ -115,7 +115,7 @@ silent -- including one that emitted 1 function out of 4,465 and exited
 successfully -- so each pipeline stage now reports counts. See
 [PHASE02-FINDINGS.md](PHASE02-FINDINGS.md).
 
-### 03 — Runtime harness
+### 03 — Runtime harness ✅
 
 Register RT64. Wire VI timing. Controller callback into `OSContPad`. Audio
 callback through ultramodern. Controller Pak saves — start from the
@@ -123,9 +123,13 @@ callback through ultramodern. Controller Pak saves — start from the
 ROM ingest on first run, into a per-user data directory.
 
 **Gate:** the executable reaches `recomp_entrypoint` and runs the first thread.
-*Not met.* The port builds and links, RT64 brings up Direct3D 12 and enumerates
-the GPU, and the process then fail-fasts on the renderer thread before the game
-thread starts. See [PHASE03-FINDINGS.md](PHASE03-FINDINGS.md).
+*Met:* `recomp_entrypoint` is reached and the game thread runs, on 10 of 10
+runs. The port brings RT64 up itself (`src/rt64_context.cpp`) rather than
+depending on the frontend. Two bugs stood in the way, both in the hand-written
+game entry rather than anywhere exotic: the entrypoint address was not
+sign-extended, so the emulated IPL3 DMA wrote 4 GB past RDRAM; and the port
+never called `load_stored_rom()`, so that DMA had an empty source span. See
+[PHASE03-FINDINGS.md](PHASE03-FINDINGS.md).
 
 **Amendment.** This phase said "Register RT64" and left RecompFrontend to phase
 06. That ordering is wrong: `create_render_context` is mandatory, has no

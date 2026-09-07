@@ -4,10 +4,11 @@ A **native PC port of _Rayman 2: The Great Escape_ (N64, USA)**, built by
 **static recompilation** with the [N64Recomp][N64Recomp] toolchain — the same
 approach behind [Zelda 64: Recompiled](https://github.com/Zelda64Recomp/Zelda64Recomp).
 
-> **Status: phase 03 in progress — it builds, it does not yet run.** The port
-> now compiles and links into an executable and RT64 brings up Direct3D 12, but
-> the process stops on the renderer thread before the game starts, so
-> **`recomp_entrypoint` has not been reached**. Details and the next step are in
+> **Status: phase 03 complete — the game boots into recompiled code.** The port
+> builds, brings up RT64 (Direct3D 12) itself, loads your ROM and reaches
+> `recomp_entrypoint` on every run — the recompiled game's own code is now
+> executing. It does not render or play yet: execution stops at the first
+> indirect jump, which is phase 04's work. Details in
 > **[docs/PHASE03-FINDINGS.md](docs/PHASE03-FINDINGS.md)**.
 >
 > **Phase 02 complete — the game recompiles.** The ROM splits into an

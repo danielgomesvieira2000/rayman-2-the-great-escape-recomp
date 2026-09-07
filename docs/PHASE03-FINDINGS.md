@@ -1,17 +1,16 @@
 # Phase 03 findings — runtime harness
 
-> **Update: the port now brings RT64 up on its own, without the frontend.**
-> `src/rt64_context.cpp` implements ultramodern's `RendererContext` directly on
-> `RT64::Application`, and a build configured with `-DRAYMAN2_ENABLE_FRONTEND=OFF`
-> reaches `[rayman2] RT64 ready (graphics api 1)` every time. That removes the
-> frontend from the critical path, which is what this phase was blocked on.
+> **Gate MET.** `recomp_entrypoint` is reached and the game thread runs, on
+> **10 of 10 runs**. The port brings RT64 up itself (`src/rt64_context.cpp`), so
+> this does not depend on the frontend initialising. The next failure is
+> `Failed to find function at 0x80000450`, which is deterministic and is phase
+> 04's starting point.
 >
-> **The gate is still not met, and one run must not be mistaken for meeting it.**
-> A single run did reach the game — see *One run reached the entrypoint* below —
-> but the current build does not, and I was unable to get back to it. Read that
-> section before trusting anything here.
+> The sections below are kept as written, including the wrong turns, because the
+> wrong turns are most of what was learned. Read *How it was actually found* at
+> the end for the resolution.
 
-**Gate NOT met.** The port builds and links into `rayman2-recomp.exe`, RT64
+**Gate NOT met** *(as written at the time; see the banner above)*. The port builds and links into `rayman2-recomp.exe`, RT64
 initialises Direct3D 12 and enumerates the GPU, and then the process dies on the
 renderer thread before the game thread starts. `recomp_entrypoint` has not been
 reached.
@@ -338,3 +337,97 @@ query it with `VirtualQuery`, rather than more reasoning from the outside. The
 - `Failed to find function at 0x80000450` is still real and still unfixed, but
   it is downstream of this and only observable once the DMA succeeds. Declaring
   that boundary was tried and made things worse -- see `recomp/symbol_addrs.txt`.
+
+
+---
+
+# How it was actually found
+
+Three predictions were made about this crash and all three were wrong. The thing
+that ended it was measurement, and it is worth recording which measurement.
+
+**Wrong:** the frontend's menu bring-up. **Wrong:** unguarded `app` pointers in
+`src/rt64_context.cpp` on the renderer thread. **Wrong:** a non-reproducible
+build. Each was plausible, each was argued from the source, and each cost a
+round trip.
+
+What worked was `src/crash_report.cpp` -- an unhandled-exception filter that
+prints the faulting address, read vs write, a stack walk as module+offset, and
+`VirtualQuery` on the address that faulted. Built once as `RelWithDebInfo` and
+resolved with `llvm-symbolizer`, it named the site immediately:
+
+```
+recomp::do_rom_read()      librecomp/src/pi.cpp:72
+init()                     librecomp/src/recomp.cpp:505
+```
+
+The game thread, not the renderer. Then `VirtualQuery` said the destination was
+`state=FREE` -- not protected, not reserved, simply nothing there. And printing
+librecomp's RDRAM base next to the faulting address gave the arithmetic:
+
+```
+rdram base      = 0x19652630000
+writing address = 0x19752630403
+difference      = 0x100000403
+```
+
+`0x100000403`, where `0x403` was intended. Off by exactly `0x1_00000000`.
+
+## The bug
+
+`MEM_B` resolves a game address as `rdram + (addr ^ 3) - 0xFFFFFFFF80000000`.
+That subtraction assumes the address is a **sign-extended** 32-bit value, which
+every MIPS address in this runtime is: KSEG0 `0x80000400` is
+`0xFFFFFFFF80000400`, not `0x0000000080000400`.
+
+`src/main.cpp` declared the game entry with a bare literal:
+
+```c
+.entrypoint_address = 0x80000400,          // zero-extended -> offset 0x100000403
+.entrypoint_address = (gpr)(int32_t)0x80000400u,   // sign-extended -> offset 0x403
+```
+
+With the zero-extended value, librecomp's emulated IPL3 DMA computed a
+destination 4 GB past the base -- beyond the end of the RDRAM reservation, in
+unmapped space -- and faulted four bytes into a 1 MB copy, before the entrypoint
+was ever called.
+
+N64Recomp's own generated `lookup.cpp` writes the same constant as
+`(gpr)(int32_t)0x80000400u`. The generated code had it right; the hand-written
+game entry did not.
+
+## A second, independent bug fixed on the way
+
+```
+pre-start: rom_valid=1 rom_loaded=0 rom_bytes=0
+```
+
+`check_all_stored_roms()` and `is_rom_valid()` establish only that a correct
+dump exists in the config directory. **They do not read it, and neither does
+`start_game()`** -- the port must call `recomp::load_stored_rom()`, and it did
+not. `do_rom_read` computes its source as `rom.data() + physical_addr -
+rom_base`; from an empty span that is an offset from `nullptr`.
+
+This would have crashed on its own. It was masked by the sign-extension bug,
+which faulted on the *destination* first.
+
+## What phase 04 starts from
+
+- **A deterministic failure**: `Failed to find function at 0x80000450`, 10 runs
+  out of 10. `0x80000450` is where the entry stub's `jr $t2` goes; splat sizes
+  `func_80000400` at `0xC0` and swallows the function starting there, and
+  because the jump is indirect splat never saw a call to it.
+- Declaring that boundary was tried during phase 03 and made things worse, but
+  that was measured *through* the sign-extension bug and is worth re-testing now
+  that the boot path is sound.
+- **A crash reporter that works**, a `RelWithDebInfo` build with a PDB, and
+  `llvm-symbolizer` to resolve it. Every fault from here names a function and a
+  line.
+
+## The lesson, stated plainly
+
+Three source-level hypotheses lost to one measurement. The reporter should have
+been the first thing built, not the fourth, and `VirtualQuery` on a faulting
+address is worth more than any amount of reading allocation code -- it reported
+`FREE` where the source clearly said `PAGE_READWRITE`, and that contradiction
+was the whole answer.

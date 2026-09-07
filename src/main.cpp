@@ -344,7 +344,21 @@ std::vector<recomp::GameEntry> supported_games = {
         // type, so the save type here is genuinely None.
         .save_type     = recomp::SaveType::None,
         .is_enabled    = true,
-        .entrypoint_address = 0x80000400,
+        // MUST be sign-extended. `gpr` is 64-bit, and every MIPS address the
+        // runtime handles is a sign-extended 32-bit value: KSEG0 0x80000400 is
+        // 0xFFFFFFFF80000400, not 0x0000000080000400.
+        //
+        // Writing the bare literal here cost a long debugging session. MEM_B
+        // resolves a game address as rdram + (addr ^ 3) - 0xFFFFFFFF80000000,
+        // so a zero-extended entrypoint yields offset 0x100000403 instead of
+        // 0x403 -- exactly 0x1_00000000 too far, past the end of the 4 GB RDRAM
+        // reservation and into unmapped space. librecomp's emulated IPL3 DMA
+        // then wrote there and took an access violation four bytes into the
+        // copy, three frames deep in the runtime, long before the entrypoint.
+        //
+        // N64Recomp's own generated lookup.cpp writes the same constant as
+        // (gpr)(int32_t)0x80000400u for this reason; this must match it.
+        .entrypoint_address = (gpr)(int32_t)0x80000400u,
         .entrypoint         = rayman2_entrypoint,
     },
 };

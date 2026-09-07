@@ -329,6 +329,12 @@ std::unique_ptr<ultramodern::renderer::RendererContext>
 create_render_context(uint8_t* rdram,
                       ultramodern::renderer::WindowHandle window_handle,
                       bool developer_mode) {
+    // This is the only place the port is handed librecomp's RDRAM base, so it
+    // is the only place that can report it. Worth printing: the crash under
+    // investigation writes to an address VirtualQuery calls FREE, and knowing
+    // the base says whether that address is a bad offset from a good base or a
+    // good offset from a bad base.
+    std::fprintf(stderr, "[rayman2] rdram base = %p\n", static_cast<void*>(rdram));
     return std::make_unique<RT64Context>(rdram, window_handle, developer_mode);
 }
 
