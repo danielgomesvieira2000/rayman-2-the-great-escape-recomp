@@ -49,3 +49,11 @@ rm -f RecompiledFuncs/*.c
 echo "=== output ==="
 echo "generated .c files : $(find RecompiledFuncs -name '*.c' | wc -l)"
 echo "total size         : $(du -sh RecompiledFuncs | cut -f1)"
+
+# Record what this run consumed and produced. Phase 04 is a bisecting exercise,
+# and bisecting is only meaningful if the same inputs give the same outputs --
+# and if a run that breaks that is reported rather than silently accepted.
+#   python3 tools/manifest.py check   -> compares a later run against this one
+echo
+echo "=== manifest ==="
+python3 tools/manifest.py write | head -1

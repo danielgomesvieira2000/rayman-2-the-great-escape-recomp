@@ -1,9 +1,9 @@
 # Building rayman-2-the-great-escape-recomp
 
-> **Phase 00.** Only the ROM tooling runs today; there is no game build yet.
-> This document describes the prerequisites and the pipeline as it comes online,
-> so the environment can be stood up in parallel with phase 01. The phase gates
-> are in [docs/PLAN.md](docs/PLAN.md).
+> **Phase 03.** The full pipeline runs and produces an executable that starts,
+> brings up RT64 and then crashes on the renderer thread; the game does not
+> play yet. Everything below works as written. The phase gates are in
+> [docs/PLAN.md](docs/PLAN.md).
 
 ## What you need first
 
@@ -87,27 +87,55 @@ Native Metal via RT64. Needs Homebrew LLVM plus CMake and Ninja. Apple Clang
 builds the host app but **cannot** build the MIPS patches — use Homebrew LLVM
 18.x for those.
 
-## The pipeline, once phase 01 lands
+## The pipeline
 
 ```bash
-# 1. Dependencies and the recompiler itself.
+# 1. Dependencies, and the recompiler itself.
 git submodule update --init --recursive
-scripts/setup.sh                 # or scripts/setup.ps1  -> builds N64Recomp + RSPRecomp
+scripts/setup-splat.sh                # splat, in WSL or on Linux
+scripts/build-recompiler.sh           # -> ./N64Recomp, ./RSPRecomp
 
 # 2. Split the ROM and assemble the symbol-rich ELF (WSL / Linux).
-scripts/split-rom.sh path/to/rom.z64          # splat -> asm/ -> elf/rayman2.us.elf
+scripts/split-rom.sh                  # splat -> asm/ + recomp/rayman2.us.ld
+scripts/build-elf.sh                  # assemble + link -> elf/rayman2.us.elf
+scripts/verify-elf.sh                 # byte-identity against your ROM
 
 # 3. Recompile the game to C.
-./N64Recomp recomp/rayman2.us.toml            # -> RecompiledFuncs/*.c
+scripts/recompile.sh                  # -> RecompiledFuncs/*.c, and a manifest
 
-# 4. Configure and build the port.
-cmake -S . -B build-cmake -G Ninja \
-      -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl \
-      -DCMAKE_BUILD_TYPE=Release
+# 4. Configure and build the port (from an x64 Native Tools prompt).
+cmake -S . -B build-cmake -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DCMAKE_BUILD_TYPE=Release
 cmake --build build-cmake -j
 ```
 
-Re-run step 3 whenever the ELF or any `recomp/*.toml` changes.
+Re-run step 3 whenever the ELF or `recomp/rayman2.us.toml` changes, and steps
+2-3 whenever `recomp/symbol_addrs.txt` or the splat config changes.
+
+**Two build configurations.** `-DRAYMAN2_ENABLE_FRONTEND=ON` (the default)
+builds with RecompFrontend's launcher and uses its RT64 context.
+`-DRAYMAN2_ENABLE_FRONTEND=OFF` builds without any UI and uses the port's own
+context in `src/rt64_context.cpp`, which is what makes the game bootable
+independently of whether the menu system initialises.
+
+
+## Checking that a build is reproducible
+
+`scripts/recompile.sh` records a manifest of every input it consumed and every
+artifact it produced (`recomp/pipeline.manifest.json`, committed). A later run
+can check itself against it:
+
+```bash
+python tools/manifest.py check
+```
+
+It exits non-zero, loudly, if the outputs moved while the inputs did not. That
+is the case worth catching: it means re-running the pipeline is not giving the
+same result, and no build can then be reasoned about by comparing it with a
+previous one.
+
+Measured as of this writing, the pipeline **is** reproducible -- splitting,
+assembling and recompiling twice from the same ROM and the same committed
+configuration produces byte-identical `asm/`, ELF and `RecompiledFuncs/`.
 
 ## Notes
 

@@ -212,31 +212,71 @@ So the honest position is: the gate was reached once, it is not reached now, and
 the difference is not explained by any source change I can identify. Claiming
 the gate on the strength of that single run would be wrong.
 
-## The real finding: the build is not reproducible
+## Correction: the build WAS reproducible; I was wrong
 
-The above is only mysterious because **the generated C cannot be reproduced from
-the committed tree**, and that is a defect in the pipeline rather than a quirk.
+The section that stood here claimed the generated C could not be reproduced from
+the committed tree, and blamed a feedback loop through `auto_funcs.txt` and
+`ignored_syms.txt`. **That was wrong, and it was asserted without being
+measured.** `tools/manifest.py` now hashes every pipeline input and output, and
+the measurement is unambiguous:
 
-`recomp/auto_funcs.txt` and `recomp/ignored_syms.txt` are generated, git-ignored,
-and *fed back into the split*: `auto_funcs.txt` is read by splat on the next run
-and changes which functions exist, and `ignored_syms.txt` is derived from the
-ELF that splat produces. The loop is meant to converge, but nothing pins where
-it converged, and nothing detects it converging somewhere different. Re-running
-the pipeline is therefore not guaranteed to reproduce the previous
-`RecompiledFuncs/`, and when it does not, there is no record of what changed.
+```
+REPRODUCIBLE: every input and output matches the recorded manifest.
+```
 
-That has to be fixed before phase 04, because phase 04 is a bisecting exercise
-and bisecting requires that the same inputs give the same outputs. Concretely:
+Splitting, assembling and recompiling twice from the same ROM and the same
+committed configuration produces byte-identical `asm/`, ELF and
+`RecompiledFuncs/`. The supposed feedback loop is not even operating:
+`auto_funcs.txt` contains no declarations at all, because the JAL-target pass
+found every call target already classified.
 
-1. Make `scripts/recompile.sh` record a manifest — hashes of the ELF, of every
-   generated symbol file, and of the generated C — so two runs can be compared.
-2. Decide whether the convergence products belong in the repository after all.
-   They are ROM-derived in the sense that they are addresses measured from the
-   cartridge, which is the same category as the tables already documented in
-   `docs/`, so committing them is defensible and would make the tree
-   self-consistent.
-3. Only then resume boot debugging, with a debugger and a breakpoint rather than
-   by regenerating and re-running.
+The manifest is kept regardless. It is what turned a guess into a fact in a
+single command, and phase 04 needs that guarantee to be checkable rather than
+assumed. `scripts/recompile.sh` writes it on every run; `python
+tools/manifest.py check` compares a later run and exits non-zero if outputs move
+while inputs do not.
+
+## What was actually happening
+
+Running the same binary ten times:
+
+```
+reached recomp_entrypoint: 1 / 10
+  0xC0000005 x9      access violation
+  0xC0000409 x1      fail-fast, after "Failed to find function at 0x80000450"
+```
+
+So the *program* is non-deterministic, not the build. The one run that reached
+the game was not progress that later regressed -- it was the one run in ten that
+got the game thread started before the renderer thread crashed.
+
+The renderer thread access-violates either way. That is the bug.
+
+An attempt to fix it as a startup race -- waiting for the renderer's first
+presented frame instead of `main()`'s blind 500 ms sleep before `start_game` --
+made the failure **deterministic in the other direction**: 0 of 10 now reach the
+entrypoint, all with `0xC0000005`. That is the expected consequence if the
+renderer dies before ever presenting a frame, since the wait then never
+completes. It is kept anyway, for two reasons: waiting on a real signal is
+correct where sleeping a guessed interval is not, and a failure that reproduces
+every time is worth more than one that hides nine times in ten.
+
+## Where phase 04 should start
+
+Not with the boot path, and not with symbol boundaries. With a debugger on the
+renderer thread:
+
+1. Attach and break on the access violation in a `-DRAYMAN2_ENABLE_FRONTEND=OFF`
+   build. It reproduces every time now, which is the whole point of the change
+   above.
+2. The prime suspects are in `src/rt64_context.cpp`, and they are mine, not
+   RT64's: `update_screen`, `send_dl` and `send_dummy_workload` all dereference
+   `app` and `app->state` with no null check, on a thread that can call them
+   before or after the game exists.
+3. `Failed to find function at 0x80000450` is real and still needs fixing, but
+   it is downstream of this and only observable once the renderer stops dying.
+   Note that declaring that boundary was tried and made things worse, so it is
+   not as simple as it looks -- see `recomp/symbol_addrs.txt`.
 
 ## Also fixed here
 

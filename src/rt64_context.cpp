@@ -30,6 +30,7 @@
 // window and no explanation.
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
@@ -39,6 +40,15 @@
 #include "ultramodern/config.hpp"
 #include "ultramodern/renderer_context.hpp"
 #include "ultramodern/ultramodern.hpp"
+
+namespace rayman2 {
+    // Defined here rather than in main.cpp so that the only thing that can set
+    // it is the renderer actually running a frame.
+    std::atomic<bool>& vi_has_ticked() {
+        static std::atomic<bool> ticked{false};
+        return ticked;
+    }
+}
 
 namespace {
 
@@ -230,6 +240,11 @@ void RT64Context::send_dummy_workload(uint32_t fb_address) {
 }
 
 void RT64Context::update_screen() {
+    // Publish that the VI thread has run at least once. main() waits on this
+    // before starting the game: ultramodern's VI thread only seeds a video mode
+    // while the game has not started, so starting first races it and the update
+    // path dereferences a mode that is not there yet.
+    rayman2::vi_has_ticked().store(true, std::memory_order_release);
     app->updateScreen();
 }
 

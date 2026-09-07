@@ -67,6 +67,9 @@ RspUcodeFunc* rayman2_get_rsp_microcode(const OSTask* task);
 // game-side addresses can be resolved back to recompiled functions.
 void rayman2_register_sections();
 
+// src/rt64_context.cpp -- set true once the renderer has presented a frame.
+namespace rayman2 { std::atomic<bool>& vi_has_ticked(); }
+
 // src/render_context.cpp
 namespace rayman2 {
     std::unique_ptr<ultramodern::renderer::RendererContext>
@@ -385,9 +388,22 @@ int main(int argc, char** argv) {
     // Without the frontend there is no launcher to start the game, so do it
     // here once the runtime is up. With the frontend, its launcher owns this
     // decision and starting from here would race it.
+    // Wait for the renderer's first frame, not a fixed delay.
+    //
+    // ultramodern's VI thread only seeds a dummy video mode while the game has
+    // not started; starting the game before its first tick makes the VI update
+    // path dereference a mode that does not exist yet. A sleep here raced that
+    // and lost about nine times in ten -- an access violation before librecomp
+    // even initialised its heap, with the successful tenth run being the only
+    // one that looked like progress.
     std::thread([game_id]() {
         using namespace std::chrono_literals;
-        std::this_thread::sleep_for(500ms);
+        for (int i = 0; i < 1000 && !rayman2::vi_has_ticked().load(std::memory_order_acquire); ++i) {
+            std::this_thread::sleep_for(10ms);
+        }
+        if (!rayman2::vi_has_ticked().load(std::memory_order_acquire)) {
+            std::fprintf(stderr, "[rayman2] renderer never presented a frame; starting anyway\n");
+        }
         recomp::start_game(game_id, "");
     }).detach();
 #else
