@@ -84,3 +84,147 @@ stubs = [
 # through data it has itself declared invalid, so anything observed afterwards
 # may be an artefact of that corrupted state rather than a real finding. A
 # diagnostic that quietly becomes permanent is worse than no diagnostic.
+
+# ---------------------------------------------------------------------------
+# Function text hooks.
+#
+# N64Recomp splices this text verbatim into its own generated C, immediately
+# before the instruction at `before_vram`. Both `rdram` and `ctx` are in scope
+# there, because every recompiled function takes them.
+#
+# This is a far lighter mechanism than the patches/ layer: no MIPS
+# cross-compilation, no separate ELF, no reference symbol tables. (The MIPS
+# toolchain was verified available anyway -- WSL carries LLVM 18.1.8 with the
+# mips big-endian target and ld.lld, which is exactly the pin BUILDING.md asks
+# for -- but none of it is needed for this.)
+#
+# DIAGNOSTIC. 0x80088D90 is the `lw $v0, 0xC($s0)` that loads the field the
+# game then asserts must fit in a byte. $s0 is register 16, and holds the list
+# node. Injecting before that instruction reports the node while it is still
+# intact.
+[[patches.hook]]
+func = "func_80088B5C"
+before_vram = 0x80088D90
+text = "rayman2_debug_node(rdram, (uint32_t)ctx->r16);"
+
+# Which call site fires?
+#
+# Two false starts here, both instructive. The node hook on the site the
+# disassembly trace picked out never fired, and a hook at the routine's own
+# entry reported $ra == 0. Then a first sweep of call sites found ten -- and
+# none of those fired either, because it had scanned only asm/main.s. The
+# assert routine is called from all three segments.
+#
+# So: one hook per `jal func_8008F86C`, across boot, main and aux. Each reports
+# its own address. The lesson is the same one this phase keeps teaching -- ask
+# every candidate rather than reason about which it ought to be.
+
+[[patches.hook]]           # asm/boot.s
+func = "func_800004C0"
+before_vram = 0x800006AC
+text = "rayman2_debug_site(rdram, 0x800006ACu);"
+
+[[patches.hook]]           # asm/boot.s
+func = "func_80002414"
+before_vram = 0x80002480
+text = "rayman2_debug_site(rdram, 0x80002480u);"
+
+[[patches.hook]]           # asm/boot.s
+func = "func_80002414"
+before_vram = 0x80002558
+text = "rayman2_debug_site(rdram, 0x80002558u);"
+
+[[patches.hook]]           # asm/boot.s
+func = "func_80002578"
+before_vram = 0x800025A4
+text = "rayman2_debug_site(rdram, 0x800025A4u);"
+
+[[patches.hook]]           # asm/boot.s
+func = "func_80002628"
+before_vram = 0x80002658
+text = "rayman2_debug_site(rdram, 0x80002658u);"
+
+[[patches.hook]]           # asm/boot.s
+func = "func_80002E0C"
+before_vram = 0x80002EBC
+text = "rayman2_debug_site(rdram, 0x80002EBCu);"
+
+[[patches.hook]]           # asm/boot.s
+func = "func_80002E0C"
+before_vram = 0x80002EC4
+text = "rayman2_debug_site(rdram, 0x80002EC4u);"
+
+[[patches.hook]]           # asm/main.s
+func = "func_80088B5C"
+before_vram = 0x80088DA0
+text = "rayman2_debug_site(rdram, 0x80088DA0u);"
+
+[[patches.hook]]           # asm/main.s
+func = "func_8009138C"
+before_vram = 0x80091428
+text = "rayman2_debug_site(rdram, 0x80091428u);"
+
+[[patches.hook]]           # asm/main.s
+func = "func_8009138C"
+before_vram = 0x80091440
+text = "rayman2_debug_site(rdram, 0x80091440u);"
+
+[[patches.hook]]           # asm/main.s
+func = "func_8009A574"
+before_vram = 0x8009A644
+text = "rayman2_debug_site(rdram, 0x8009A644u);"
+
+[[patches.hook]]           # asm/main.s
+func = "func_800A8FA8"
+before_vram = 0x800A8FC0
+text = "rayman2_debug_site(rdram, 0x800A8FC0u);"
+
+[[patches.hook]]           # asm/main.s
+func = "func_800A9020"
+before_vram = 0x800A9034
+text = "rayman2_debug_site(rdram, 0x800A9034u);"
+
+[[patches.hook]]           # asm/main.s
+func = "func_800A9080"
+before_vram = 0x800A90A0
+text = "rayman2_debug_site(rdram, 0x800A90A0u);"
+
+[[patches.hook]]           # asm/main.s
+func = "func_800A91A0"
+before_vram = 0x800A91D0
+text = "rayman2_debug_site(rdram, 0x800A91D0u);"
+
+[[patches.hook]]           # asm/main.s
+func = "func_800A925C"
+before_vram = 0x800A9270
+text = "rayman2_debug_site(rdram, 0x800A9270u);"
+
+[[patches.hook]]           # asm/main.s
+func = "func_800AE9DC"
+before_vram = 0x800AEA00
+text = "rayman2_debug_site(rdram, 0x800AEA00u);"
+
+[[patches.hook]]           # asm/aux.s
+func = "func_800F8D38"
+before_vram = 0x800F8D60
+text = "rayman2_debug_site(rdram, 0x800F8D60u);"
+
+[[patches.hook]]           # asm/aux.s
+func = "func_800F9280"
+before_vram = 0x800F9314
+text = "rayman2_debug_site(rdram, 0x800F9314u);"
+
+[[patches.hook]]           # asm/aux.s
+func = "func_800FEF5C"
+before_vram = 0x800FF150
+text = "rayman2_debug_site(rdram, 0x800FF150u);"
+
+[[patches.hook]]           # asm/aux.s
+func = "func_800FFD98"
+before_vram = 0x800FFEBC
+text = "rayman2_debug_site(rdram, 0x800FFEBCu);"
+
+[[patches.hook]]           # asm/aux.s
+func = "func_800FFD98"
+before_vram = 0x80100040
+text = "rayman2_debug_site(rdram, 0x80100040u);"

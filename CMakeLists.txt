@@ -161,7 +161,8 @@ set(PORT_SOURCES
     src/port_runtime.cpp
     src/register_sections.cpp
     src/crash_report.cpp
-    src/thread_sampler.cpp)
+    src/thread_sampler.cpp
+    src/debug_node.cpp)
 
 # The renderer context. With the frontend, RecompFrontend owns the RT64
 # application (its menus draw as an overlay and need the render hooks), so the

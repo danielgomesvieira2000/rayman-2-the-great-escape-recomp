@@ -52,6 +52,14 @@ void __osSiDeviceBusy_recomp(uint8_t* rdram, recomp_context* ctx);
 void __osSetSR_recomp(uint8_t* rdram, recomp_context* ctx);
 void __osSetCompare_recomp(uint8_t* rdram, recomp_context* ctx);
 
+/* Diagnostic, called from a [[patches.hook]] injected into the recompiled code.
+   Declared here because this header is force-included into every generated
+   source, which is what makes the injected text compile. See
+   src/debug_node.cpp. */
+void rayman2_debug_node(uint8_t* rdram, uint32_t node_addr);
+void rayman2_debug_assert(uint8_t* rdram, uint32_t ra);
+void rayman2_debug_site(uint8_t* rdram, uint32_t site);
+
 #ifdef __cplusplus
 }
 #endif

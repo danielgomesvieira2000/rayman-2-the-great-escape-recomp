@@ -487,6 +487,85 @@ running game from a spinning one. Only sampling where the code actually is could
   fills it. That needs the phase 06 MIPS toolchain (LLVM 18.1.8), and it is now
   clearly worth setting up rather than a maybe.
 
+## The hook, and a correction to the whole assert trace
+
+### The MIPS toolchain was not needed
+
+It is available -- WSL carries **LLVM 18.1.8** with the `mips` big-endian target
+and `ld.lld`, exactly the pin BUILDING.md asks for, and the Windows LLVM (22.1.8)
+is far too new. But none of it is required for this, because N64Recomp has a
+much lighter mechanism than the `patches/` layer:
+
+```toml
+[[patches.hook]]
+func = "func_800004C0"
+before_vram = 0x800006AC
+text = "rayman2_debug_site(rdram, 0x800006ACu);"
+```
+
+`FunctionTextHook` splices that text verbatim into the recompiled C, where
+`rdram` and `ctx` are both in scope. No cross-compilation, no separate ELF, no
+reference symbol tables. The helpers live in `src/debug_node.cpp` and are
+declared in `include/port_runtime.h`, which is force-included into every
+generated source -- which is what makes injected text compile.
+
+### Three false starts, and what each taught
+
+1. **Hooked the call site the disassembly trace had identified. It never fired.**
+2. **Hooked the assert routine's own entry.** It fired, reporting `$ra == 0`.
+3. **Swept the call sites** -- and found ten, none of which fired, because the
+   sweep had scanned only `asm/main.s`. There are **22** across boot, main and
+   aux.
+
+Hooking all 22 answered it immediately.
+
+### The answer, and the correction
+
+The assert fires at **`0x800006AC`**, in the **boot** segment, inside
+`func_800004C0` -- the thread `main` creates and starts. That is precisely where
+the thread sampler had already located the spin, so the two instruments agree.
+
+```
+jal   osCreateThread
+jal   osStartThread          ; start the child thread
+addiu $s0, $zero, 0x1        ; s0 = 1
+.L8000069C:
+lhu   $v0, D_800250D8        ; load a 16-bit flag
+.L800006A4:
+bne   $v0, $s0, .L800006A4   ; spin while flag != 1 -- v0 is NOT reloaded
+jal   func_8008F86C          ; flag == 1 -> trap
+j     .L8000069C             ; reload and go round again
+```
+
+**So the entire list-serialiser trace was the wrong path.** The sections above
+that follow `func_80088B5C`, its node layout, the field at `0xC` and the `sb`
+that narrows it are all accurate as *description*, and all irrelevant as
+*diagnosis*: that assert never fires. It was found by searching for a call to
+the assert routine and finding one, not by establishing which call actually
+happens. The evidence was already there and was under-weighted -- NOPing that
+site's `jal` did not stop the break, which by itself proved the firing site was
+elsewhere.
+
+### What the real site says
+
+`main` creates a thread, starts it, and then loops on a 16-bit flag at
+`D_800250D8`: it spins while the flag is not 1, and traps when it is. The flag
+lives in the boot segment's bss. The trap is reached, so the flag reads 1 when
+the code expects to wait on it -- either it is genuinely set, or the memory
+backing it is not what the game expects.
+
+This is a far better place to be than the serialiser. It is four instructions,
+in the boot thread, on one variable, immediately after the thread hand-off that
+phase 04 already had to fix once.
+
+### The lesson, again
+
+Every instrument in this phase has overturned a conclusion reached by reading:
+the counters overturned "stuck in a wait", the sampler overturned "not the
+blocker", and the hook overturned the whole assert trace. The pattern is
+consistent enough to state as a rule: **in this codebase, a plausible path found
+by reading is not evidence that it is the path taken.** Ask the running program.
+
 ## Still outstanding
 
 - **Nineteen functions in the boot segment poke hardware registers** (a scan for
