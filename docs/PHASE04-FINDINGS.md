@@ -566,7 +566,7 @@ blocker", and the hook overturned the whole assert trace. The pattern is
 consistent enough to state as a rule: **in this codebase, a plausible path found
 by reading is not evidence that it is the path taken.** Ask the running program.
 
-## Root cause: osStartThread does not write OSThread.state
+## Root cause: OSThreadState used the wrong numeric values
 
 Following the real assert site to its end found the reason the game does not
 boot, and it is not in the game.
@@ -640,18 +640,45 @@ inspects directly.
 That makes it the first problem in this port that has to be fixed in the runtime
 rather than in configuration.
 
-### Fixing it
+### The actual cause was narrower, and worse
 
-The repository already consumes a fork of N64ModernRuntime (the `controller-pak`
-branch), so there is somewhere to put this. The change is small: on the
-`thread_self` path, set the game-visible `state` to match what the scheduler has
-actually done, as the other path already does.
+Checking before writing the fix was worth it, because the first diagnosis --
+"osStartThread does not write state" -- was only half right. It does not write
+it on that path, but the field was not left unwritten either. The scheduler sets
+it, and the value it sets is wrong:
 
-Worth confirming before writing it: which of `QUEUED` / `RUNNING` the game
-expects to see between `osStartThread` and the thread being scheduled, since the
-poll only cares that it is not `STOPPED`. Anything other than 1 unblocks this
-particular case, but the field is observable to any game, so it should be right
-rather than merely non-1.
+```c
+typedef enum { STOPPED, QUEUED, RUNNING, BLOCKED } OSThreadState;   // 0,1,2,3
+```
+
+ultramodern enumerated these from zero. libultra defines them as **bit flags** --
+`OS_STATE_STOPPED 1`, `RUNNABLE 2`, `RUNNING 4`, `WAITING 8` -- and the game
+proves it uses those numbers: its own `osStartThread` compares `state` against 1
+and 8 and writes 2, and its `osRecvMesg` writes 8.
+
+So ultramodern's `QUEUED` is **1**, and libultra's `OS_STATE_STOPPED` is also 1.
+The scheduler queues the thread, writes 1, and the idle thread reads "stopped".
+Not a missing write: a value collision, in a field that is part of the ABI
+because `OSThread` lives in RDRAM and games read it directly.
+
+### The fix, and why it is safe
+
+`OSThreadState` now carries libultra's values, in the fork's `controller-pak`
+branch (`ultramodern/include/ultramodern/ultra64.h`). The change is confined to
+that boundary: every use of the field inside ultramodern is symbolic
+(`OSThreadState::STOPPED`, `::QUEUED` -- six sites in `threads.cpp` and
+`scheduling.cpp`), and the only numeric comparisons on a member called `state`
+elsewhere in the tree belong to the unrelated VI state flags.
+
+**Verified, not assumed.** With it applied the game runs indefinitely with no
+break and no trap, where before it died within two seconds on every run. The
+sampler then showed the boot thread spinning inside the idle poll -- which is
+exactly what an idle thread should do, and what the hardware does.
+
+An aside worth keeping: that sampler run was dominated by
+`rayman2_debug_flag`, the diagnostic hook still injected into the loop. A hook
+placed inside a spin runs at spin frequency. It has been removed, along with the
+rest of the hooks; `recomp/rayman2.us.toml` documents how to put one back.
 
 ## Still outstanding
 
