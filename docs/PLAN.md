@@ -149,6 +149,11 @@ function-entry trace from the start: a debugger over ~20 MB of generated C is
 not a plan, and the sibling ports' `instrument_funcs.py` exists for this.
 
 **Gate:** the Ubisoft logo, then the attract sequence, rendering recognisably.
+*Not met.* The game boots, survives libultra init and runs indefinitely with a
+window open, but renders nothing. Four faults were diagnosed and fixed to get
+there. The working method, and the reason to name public libultra entry points
+rather than emulate the hardware beneath them, are in
+[PHASE04-FINDINGS.md](PHASE04-FINDINGS.md).
 
 ### 05 — Graphics and audio correctness
 

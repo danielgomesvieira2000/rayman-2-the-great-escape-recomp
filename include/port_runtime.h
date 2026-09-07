@@ -48,6 +48,7 @@ extern "C" {
 #endif
 
 void __osGetSR_recomp(uint8_t* rdram, recomp_context* ctx);
+void __osSiDeviceBusy_recomp(uint8_t* rdram, recomp_context* ctx);
 void __osSetSR_recomp(uint8_t* rdram, recomp_context* ctx);
 void __osSetCompare_recomp(uint8_t* rdram, recomp_context* ctx);
 

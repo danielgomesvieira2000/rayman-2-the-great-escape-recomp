@@ -63,6 +63,21 @@ void __osSetCompare_recomp(uint8_t* /*rdram*/, recomp_context* ctx) {
     g_compare.store(static_cast<uint32_t>(ctx->r4), std::memory_order_relaxed);  // $a0
 }
 
+// Reports whether the Serial Interface is still busy with a transfer.
+//
+// On hardware this spins while the SI moves 64 bytes to or from PIF RAM. In the
+// port there is no such transfer to wait for: controller state is answered
+// synchronously by the runtime, so the SI is never busy and returning anything
+// else would spin the caller forever.
+//
+// This is one of N64Recomp's `ignored_funcs` -- dropped by the recompiler and
+// left for the port -- which is why it is here rather than in librecomp. The
+// game reaches it during early boot, poking SI_STATUS (0xA4800018) directly
+// rather than going through the libultra wrappers.
+void __osSiDeviceBusy_recomp(uint8_t* /*rdram*/, recomp_context* ctx) {
+    ctx->r2 = 0;   // $v0 -- never busy
+}
+
 } // extern "C"
 
 namespace rayman2 {

@@ -89,3 +89,69 @@ func_8000C3D0 = 0x8000C3D0; // type:func size:0x664
 // name is in N64Recomp's built-in ignored set, so naming it is what makes the
 // recompiler drop it.
 __osSetCompare = 0x8000CEA0; // type:func
+
+// ---------------------------------------------------------------------------
+// The entry stub, and the function it jumps into.
+//
+// splat sizes func_80000400 at 0xC0, which swallows a whole second function.
+// The stub itself is 0x50 bytes: it clears bss, sets sp, and ends with
+// `jr $t2` where t2 holds 0x80000450. That jump is INDIRECT, so splat saw no
+// call to 0x80000450 and started no function there, and librecomp cannot
+// resolve it at run time -- "Failed to find function at 0x80000450", which is
+// the first thing the game does and so the first thing that breaks.
+//
+// This was tried once during phase 03 and appeared to make things worse. That
+// measurement was taken through the entrypoint sign-extension bug, which
+// crashed the boot DMA before any of this was reached, so it said nothing
+// about these boundaries. Re-tested now that the boot path is sound.
+// ---------------------------------------------------------------------------
+func_80000400 = 0x80000400; // type:func size:0x50
+func_80000450 = 0x80000450; // type:func
+
+// ---------------------------------------------------------------------------
+// Serial Interface (controller / PIF) access.
+//
+// The game pokes SI hardware registers directly rather than only through the
+// libultra wrappers, and those addresses are KSEG1 (0xA4800018 = SI_STATUS).
+// MEM_W maps such an address to rdram + 0x24800018, which is past the 512 MB
+// librecomp maps read-write and inside the guard region it deliberately leaves
+// PAGE_NOACCESS -- so the read faults rather than returning nonsense, which is
+// the guard doing its job.
+// ---------------------------------------------------------------------------
+
+// Body is: load 0xA4800018 (SI_STATUS), read it, mask bits 0 and 1
+// (DMA_BUSY | IO_READ_BUSY), return whether either is set. That is
+// __osSiDeviceBusy and nothing else. Size 0x18 matches its six instructions.
+// The name is in N64Recomp's built-in ignored set, so naming it makes the
+// recompiler drop it -- and obliges the port to define it (src/port_runtime.cpp).
+__osSiDeviceBusy = 0x800115A0; // type:func
+
+// libultra's osInitialize, and the reason the raw SI path is a dead end.
+//
+// Body, in order: read cop0 Status and OR in 0x20000000 (CU1 -- enable the
+// FPU), set the FPU control register to 0x1000800, then spin on
+// __osSiRawReadIo(0x1FC007FC) / __osSiRawWriteIo(value | 8) -- the PIF RAM
+// handshake that tells the PIF the boot process is finished -- and finally
+// take the address of the exception handler to install it. That sequence is
+// osInitialize and nothing else.
+//
+// This name matters more than most. osInitialize is REIMPLEMENTED by librecomp
+// (ultra_translation.cpp), so naming it makes the recompiler drop the game's
+// copy and run the runtime's instead. That removes the entire raw-hardware
+// path underneath it: no PIF RAM access, no SI status polling, no exception
+// vector to install. Emulating PIF RAM to satisfy the original would have been
+// the wrong fix -- the runtime already owns all of it.
+osInitialize = 0x80003EE0; // type:func
+
+// Audio Interface. Called straight from main with a0 = 22050, and the body is
+// the frequency-to-DAC-rate conversion in floating point (mtc1 / cvt.d.w on the
+// argument) followed by writes to AI_DACRATE (0xA4500010) and AI_BITRATE. That
+// is osAiSetFrequency.
+//
+// Reimplemented by librecomp, which is the point: naming the public libultra
+// entry points hands whole subsystems to the runtime, and the low-level
+// register pokes beneath them are then never reached. The alternative -- naming
+// __osAiDeviceBusy and friends, which are in the recompiler's *ignored* set --
+// would oblige this port to emulate the AI registers itself, which is work the
+// runtime has already done.
+osAiSetFrequency = 0x80007850; // type:func

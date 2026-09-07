@@ -4,12 +4,14 @@ A **native PC port of _Rayman 2: The Great Escape_ (N64, USA)**, built by
 **static recompilation** with the [N64Recomp][N64Recomp] toolchain — the same
 approach behind [Zelda 64: Recompiled](https://github.com/Zelda64Recomp/Zelda64Recomp).
 
-> **Status: phase 03 complete — the game boots into recompiled code.** The port
-> builds, brings up RT64 (Direct3D 12) itself, loads your ROM and reaches
-> `recomp_entrypoint` on every run — the recompiled game's own code is now
-> executing. It does not render or play yet: execution stops at the first
-> indirect jump, which is phase 04's work. Details in
-> **[docs/PHASE03-FINDINGS.md](docs/PHASE03-FINDINGS.md)**.
+> **Status: phase 04 in progress — the game runs, but does not draw.** The port
+> boots into recompiled code, survives libultra initialisation and runs
+> indefinitely with a window open — but the screen stays black, so the phase 04
+> gate (the logo and attract sequence rendering) is **not** met. Details in
+> **[docs/PHASE04-FINDINGS.md](docs/PHASE04-FINDINGS.md)**.
+>
+> **Phase 03 complete** — RT64 comes up and `recomp_entrypoint` is reached on
+> every run.
 >
 > **Phase 02 complete — the game recompiles.** The ROM splits into an
 > assembly-only ELF whose three code segments are **byte-identical** to the
@@ -85,7 +87,8 @@ rayman-2-the-great-escape-recomp/
 │   ├── PHASE00-FINDINGS.md     # what the cartridge says, and how it was measured
 │   ├── PHASE01-FINDINGS.md     # the segment map, and how the ROM was split
 │   ├── PHASE02-FINDINGS.md     # the recompile, and five silent defects
-│   └── PHASE03-FINDINGS.md     # the runtime harness, and where it stops
+│   ├── PHASE03-FINDINGS.md     # the runtime harness, and where it stops
+│   └── PHASE04-FINDINGS.md     # boot bring-up: naming libultra, not emulating it
 ├── tools/
 │   ├── identify_rom.py         # verify a dump is the targeted revision
 │   ├── survey_rom.py           # reproduce the phase 00 measurements
