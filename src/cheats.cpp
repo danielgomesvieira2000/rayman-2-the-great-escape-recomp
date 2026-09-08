@@ -16,6 +16,7 @@
 // from anywhere else.
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -47,6 +48,34 @@ std::atomic<int32_t> g_health_value{-1};
 const char* kTabId = "cheats";
 const char* kInfiniteHealth = "infinite_health";
 
+// How many bytes the cheat writes. ONE by default.
+//
+// This matters more than it looks, and the first version of this file got it
+// wrong by always writing four. An N64 GameShark code of the form
+//
+//     80XXXXXX 00YY
+//
+// is "write the byte YY at RDRAM offset XXXXXX" -- the overwhelmingly common
+// shape for a value like health -- and writing four bytes at that address
+// instead would hold the intended byte AND flatten the three beside it, which
+// belong to something else entirely. 81XXXXXX is the two-byte form.
+//
+// RAYMAN2_HEALTH_WIDTH=1, 2 or 4.
+int configured_health_width() {
+    static const int width = []() -> int {
+        if (const char* env = std::getenv("RAYMAN2_HEALTH_WIDTH")) {
+            const long parsed = std::strtol(env, nullptr, 0);
+            if (parsed == 1 || parsed == 2 || parsed == 4) {
+                return static_cast<int>(parsed);
+            }
+            std::fprintf(stderr, "[rayman2] RAYMAN2_HEALTH_WIDTH=%s is not 1, 2 or 4;"
+                                 " using 1\n", env);
+        }
+        return 1;
+    }();
+    return width;
+}
+
 uint32_t configured_health_address() {
     static const uint32_t address = []() -> uint32_t {
         if (const char* env = std::getenv("RAYMAN2_HEALTH_ADDR")) {
@@ -55,7 +84,8 @@ uint32_t configured_health_address() {
             // Only a KSEG0 address inside the 8 MB an N64 has is usable; a typo
             // should read as "no address" rather than as a write somewhere odd.
             if (value >= 0x80000000u && value < 0x80800000u) {
-                std::fprintf(stderr, "[rayman2] RAYMAN2_HEALTH_ADDR: health at 0x%08X\n", value);
+                std::fprintf(stderr, "[rayman2] RAYMAN2_HEALTH_ADDR: health at 0x%08X,"
+                                     " %d byte(s)\n", value, configured_health_width());
                 return value;
             }
             std::fprintf(stderr, "[rayman2] RAYMAN2_HEALTH_ADDR=%s is not a usable RDRAM address;"
@@ -79,22 +109,35 @@ int32_t configured_health_value() {
     return value;
 }
 
-// A word in RDRAM, as the game reads it. The byte for game address A lives at
-// rdram[A ^ 3], so an aligned four come back in reverse order and reassemble
-// into the big-endian value on a little-endian host without a swap.
-uint32_t read_word(const uint8_t* rdram, uint32_t address) {
-    const uint32_t offset = address - 0x80000000u;
+// RDRAM, one byte at a time, at the address the game would use.
+//
+// The byte for game address A lives at rdram[(A - 0x80000000) ^ 3]. That XOR is
+// not optional for byte and halfword access -- it is what makes a byte written
+// here the byte the game reads -- and it was missing from the first version of
+// this file, which only ever touched aligned words, where the reversal within
+// each four happens to cancel out.
+inline uint8_t read_byte(const uint8_t* rdram, uint32_t address) {
+    return rdram[(address - 0x80000000u) ^ 3u];
+}
+
+inline void write_byte(uint8_t* rdram, uint32_t address, uint8_t value) {
+    rdram[(address - 0x80000000u) ^ 3u] = value;
+}
+
+// Big-endian, like the console: the first byte is the most significant.
+uint32_t read_value(const uint8_t* rdram, uint32_t address, int width) {
     uint32_t value = 0;
-    for (int i = 0; i < 4; i++) {
-        reinterpret_cast<uint8_t*>(&value)[i] = rdram[offset + i];
+    for (int i = 0; i < width; i++) {
+        value = (value << 8) | read_byte(rdram, address + static_cast<uint32_t>(i));
     }
     return value;
 }
 
-void write_word(uint8_t* rdram, uint32_t address, uint32_t value) {
-    const uint32_t offset = address - 0x80000000u;
-    for (int i = 0; i < 4; i++) {
-        rdram[offset + i] = reinterpret_cast<const uint8_t*>(&value)[i];
+void write_value(uint8_t* rdram, uint32_t address, int width, uint32_t value) {
+    for (int i = 0; i < width; i++) {
+        const int shift = 8 * (width - 1 - i);
+        write_byte(rdram, address + static_cast<uint32_t>(i),
+                   static_cast<uint8_t>((value >> shift) & 0xFFu));
     }
 }
 
@@ -168,12 +211,34 @@ void apply(uint8_t* rdram) {
         return;
     }
 
+    // With an address configured, report what is there once a second.
+    //
+    // This is how a candidate from src/memory_search.cpp gets confirmed: point
+    // RAYMAN2_HEALTH_ADDR at it, play, and watch whether the number falls when
+    // Rayman is damaged and rises when he is healed. An address that does that
+    // is health; one that does not is a coincidence that survived the search.
+    // Setting the variable at all means somebody is doing exactly this, so it
+    // reports without needing a second switch.
+    {
+        using clock = std::chrono::steady_clock;
+        static clock::time_point last{};
+        const clock::time_point now = clock::now();
+        if (now - last >= std::chrono::seconds(1)) {
+            last = now;
+            const int width = configured_health_width();
+            const uint32_t value = read_value(rdram, address, width);
+            std::fprintf(stderr, "[rayman2] cheat: [0x%08X] = %u (0x%0*X, %d byte(s))\n",
+                         address, value, width * 2, value, width);
+        }
+    }
+
     if (g_infinite_health.load(std::memory_order_relaxed)) {
         int32_t target = configured_health_value();
         if (target < 0) {
             // No value given: hold at the highest seen, which is what full
             // health is as soon as the game has been at full health once.
-            const int32_t current = static_cast<int32_t>(read_word(rdram, address));
+            const int32_t current =
+                static_cast<int32_t>(read_value(rdram, address, configured_health_width()));
             int32_t best = g_health_value.load(std::memory_order_relaxed);
             if (current > best) {
                 g_health_value.store(current, std::memory_order_relaxed);
@@ -182,7 +247,8 @@ void apply(uint8_t* rdram) {
             target = best;
         }
         if (target >= 0) {
-            write_word(rdram, address, static_cast<uint32_t>(target));
+            write_value(rdram, address, configured_health_width(),
+                        static_cast<uint32_t>(target));
         }
     }
 }

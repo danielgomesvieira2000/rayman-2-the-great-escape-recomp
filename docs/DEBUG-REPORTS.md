@@ -151,9 +151,34 @@ thousands of words in a running game -- timers, positions, counters -- while "it
 went down when I was hit and did not move when I was not" is true of almost
 nothing else.
 
-Confirm a candidate without rebuilding by launching with
-`RAYMAN2_HEALTH_ADDR=0x........` and turning Infinite Health on in the Cheats
-tab. When it is right, it goes into `src/cheats.cpp`.
+### Or take the address from an existing cheat code
+
+The search is the fallback. If a GameShark code for this game already exists,
+the address in it drops straight in, because this port keeps RDRAM exactly as
+the console does -- same addresses, same layout, same byte order.
+
+An N64 GameShark code is `80XXXXXX 00YY`: *write the byte `YY` at RDRAM offset
+`XXXXXX`*. The offset is the KSEG0 address with its top byte already there, so
+
+    80123456 0005   ->   RAYMAN2_HEALTH_ADDR=0x80123456
+                         RAYMAN2_HEALTH_WIDTH=1
+                         RAYMAN2_HEALTH_VALUE=5
+
+`81XXXXXX` is the two-byte form, so `RAYMAN2_HEALTH_WIDTH=2`. **The width is not
+a detail:** most such codes are byte writes, and writing four bytes at a byte's
+address holds the intended value and flattens the three beside it, which belong
+to something else.
+
+Codes are version-specific. This port targets **NUS-NY2E rev 0 (USA)**, so a
+code for the USA release should match and one for a PAL release will not.
+
+### Confirming a candidate
+
+Launch with `RAYMAN2_HEALTH_ADDR=0x........` (and the width) and the port reports
+what is at that address once a second, whether or not the cheat is on. Play, and
+watch: an address that falls when Rayman is damaged and rises when he is healed
+is health. One that does not is a coincidence that survived the search. When it
+is right, it goes into `src/cheats.cpp`.
 
 ## Soaking an intermittent failure
 
@@ -310,6 +335,9 @@ half an hour.
                                        candidate from the search
     RAYMAN2_HEALTH_VALUE=<n>           the value to hold health at (default: the
                                        highest seen so far)
+    RAYMAN2_HEALTH_WIDTH=1|2|4         how many bytes the cheat writes
+                                       (default 1, which is what a GameShark
+                                       80XXXXXX code writes)
     RAYMAN2_WATCH=0xADDR[,0xADDR..]    print those words once a second with the
                                        display-list rate beside them
     RAYMAN2_PACEMARGIN=<ms>            how far before the field boundary a
