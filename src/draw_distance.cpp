@@ -234,6 +234,34 @@ namespace rayman2 {
 // to the tab, which is what makes repurposing the setting possible without
 // forking the frontend.
 void update_widescreen_policy(int window_width, int window_height) {
+    // OFF, because as written this pair of hooks cancels itself out.
+    //
+    // The idea was to widen the aspect on the way in so the game's culling saw
+    // the real frame, and put the projection matrix back on the way out so the
+    // renderer did not widen twice. Playtesting says the culling boundary did
+    // not move, and that is the answer to a question this could not settle from
+    // the outside: the game derives its visibility test from the projection
+    // MATRIX, not from the arguments it passed to build it. Restoring [0][0]
+    // therefore restores the narrow frustum for culling as well, and the two
+    // hooks add up to nothing.
+    //
+    // The matrix cannot serve both at once. It is the same number for what the
+    // game keeps and what the renderer draws, so the only consistent
+    // arrangement is for the matrix to BE the widened one and for RT64 to stop
+    // widening on top of it -- which needs the presentation to fill the window
+    // without an aspect scale, and that is `pfm_option`, which nothing reads.
+    // See docs/issues/001.
+    //
+    // RAYMAN2_WIDESCREEN=frustum turns the pair back on for experiments.
+    static const bool enabled = []() {
+        const char* mode = std::getenv("RAYMAN2_WIDESCREEN");
+        return (mode != nullptr) && (std::strcmp(mode, "frustum") == 0);
+    }();
+    if (!enabled) {
+        g_aspect_multiplier.store(1.0f, std::memory_order_relaxed);
+        return;
+    }
+
     if (window_width <= 0 || window_height <= 0) {
         return;
     }

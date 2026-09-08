@@ -1,7 +1,9 @@
 # 001 — Geometry culled at the edges in widescreen
 
-**Status:** fixed, on by default, verified numerically. One check outstanding:
-that the framing is unchanged, which is a glance during play.
+**Status:** open. Two routes tried and both dead-ended, but between them they
+answered the question that was open: the game culls from the projection MATRIX,
+not from the arguments used to build it. That leaves exactly one arrangement
+that works, and it needs a small change in recompui.
 
 ---
 
@@ -279,3 +281,54 @@ cinematic camera moves continuously, so captures taken four seconds apart in two
 runs land at different points within the same subtitle, and apparent size cannot
 be compared between them. It is obvious to a person playing: if the field of
 view looks unchanged from the last build, it is right.
+
+## The frustum fix does not work, and why that is useful
+
+Playtesting: *"Mountains disappear after the 4:3 area mark, but I see them going
+too soon."* The cull boundary did not move.
+
+That is decisive, and it settles something no amount of reading could. The pair
+of hooks widened the aspect on the way in and restored the matrix's `[0][0]` on
+the way out. If the game's visibility test were computed from the arguments --
+from a camera struct holding fovy and aspect -- widening those would have moved
+the boundary and restoring the matrix would not have mattered. It did not move.
+
+**So the game culls from the projection matrix it just built.** Restoring
+`[0][0]` restores the narrow frustum for the culling as well, and the two hooks
+cancel exactly. They are disabled; `RAYMAN2_WIDESCREEN=frustum` re-enables them
+for experiments.
+
+## Which leaves exactly one arrangement
+
+The matrix is a single number serving two purposes: what the game keeps and what
+the renderer draws. They cannot be given different values. So:
+
+  * the matrix must **be** the widened one -- that is what fixes the culling;
+  * and RT64 must then **not** widen on top of it, or the view comes out a third
+    too wide and the seam simply moves outward;
+  * which means RT64 renders at the game's own 4:3 proportions, and the
+    presentation has to fill the window without applying an aspect scale.
+
+That last step is `PresentFillMode::Stretch`, and it is the dead field: added to
+`GraphicsConfig` in the fork, serialised, documented, and read by nothing.
+recompui's `set_application_user_config()` is what configures RT64 and has never
+heard of it. RT64's own `presentation.removeBlackBorders` is already true by
+default and is a different thing -- it removes borders the *game* draws, not the
+ones the window fit produces.
+
+## What it needs
+
+One small change in recompui: pass `pfm_option` through to RT64's presentation
+so the fill mode can be selected. Everything else -- the widening, the policy,
+the hook -- is already written and proven.
+
+That is a submodule, and this project's standing constraint is that the frontend
+is consumed rather than forked, with changes that belong upstream going
+upstream. This one plainly belongs upstream: a configuration field that exists,
+is saved to disk, and is silently ignored is a bug in RecompFrontend regardless
+of what this port wants from it. It also affects the sibling Beetle port, whose
+letterbox behaviour is documented as a baseline to be moved off later and
+currently cannot be.
+
+So it wants a decision before it is written: fork the submodule and carry a
+patch, or send it upstream and wait.
