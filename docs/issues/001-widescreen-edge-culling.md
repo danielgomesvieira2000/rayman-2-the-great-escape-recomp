@@ -1,9 +1,8 @@
 # 001 — Geometry culled at the edges in widescreen
 
-**Status:** open. Four attempts, all failed, and the fourth rules out the whole
-approach: `guPerspective` is not where this can be fixed. What is left is
-finding what Rayman 2's visibility test actually reads, which has not been
-attempted and should be done by looking rather than by inference.
+**Status:** open, but no longer stuck. The free camera settled what four
+experiments could not, and the camera setup has been traced. The next step is
+identified and is a different one from anything tried so far.
 
 ---
 
@@ -552,3 +551,85 @@ a reverse-engineering job of some size. Submitted means the game is innocent and
 something between the display list and the screen is dropping it, which is a
 much smaller and quite different search -- and it would explain why four changes
 to the game's frustum did nothing at all.
+
+## The free camera settles it: the game culls
+
+From playtesting: *"The culling is not being changed by using freecam. In the
+intro sequence it is still culling at the same point and moment, even when I
+move my freecam around."*
+
+That is the measurement the whole issue needed, and it is conclusive in a way
+none of the four code experiments were.
+
+RT64's free camera replaces the **view** matrix and re-renders the display list
+that the game already built. If anything downstream of the game were removing
+this geometry -- clipping against the projection, scissoring, rejecting
+triangles -- then moving the camera would move what is removed, because the
+test would be re-evaluated against the new view. The boundary would drift as you
+looked around.
+
+It does not move. The missing geometry is not hidden from the current viewpoint;
+it is **absent from the display list**. The game decided not to submit it, and
+no amount of looking from elsewhere can recover something that was never sent.
+
+So: the game culls. RT64 draws what it is given. Every remaining question is
+about the game's own code.
+
+## What the camera setup looks like
+
+`func_8009989C` builds the camera and calls `guPerspective` at 0x80099EDC. Read
+out of the disassembly:
+
+    fovy    = [camera + 0x68] * 57.29578          # radians to degrees, 180/PI
+    aspect  = (float)[sp + 0x6C] / (float)[sp + 0x68]
+    near    = [D_800C8D90] * [D_800C8D50]
+    far     = [D_800C8D90] * [D_800C8D54]
+
+Two things in that are worth having.
+
+**The aspect is a division of two integers** -- the screen width and height, held
+as locals, giving the 1.3393 that is 300/224. It is *derived*, not stored, which
+is why writing to it downstream changed nothing upstream.
+
+**The field of view lives in the camera object**, at offset 0x68, in radians.
+That is the parameter the game owns, and everything else in this calculation
+descends from it.
+
+(An aside that explains an earlier dead end: the ROM search for a PI constant
+found nothing because 180/PI is built with an `lui`/`ori` immediate pair in the
+instruction stream rather than stored in rodata. Searching data for a constant
+that is never in data.)
+
+There is also a pair of conditional hooks the game already has --
+`func_800996EC` and `func_800997A8`, called on the flags at `D_800C8DAC` and
+`D_800C8DAD`, both taking **&fovy and &aspect** and free to modify them. Worth
+understanding before writing anything new; the game may already have a mechanism
+for adjusting its own view.
+
+## Why the four attempts could not have worked
+
+They all wrote to the aspect, or to the matrix built from it, at or after
+`guPerspective`. The culling is computed from the camera *before* that point, so
+every one of them was downstream of the thing they were trying to influence. The
+failures were not bad luck; the approach could not have worked.
+
+## The approach worth trying next
+
+Widen the **field of view in the camera object**, not the aspect.
+
+If the visibility test is built from the camera's own parameters -- which is
+where it has to come from now that the projection is ruled out -- then `+0x68`
+is upstream of both the culling and the projection, and widening it widens both
+together. That is the property none of the previous attempts had.
+
+It is a real trade rather than a free fix: a wider field of view is a wider
+field of view, and the picture will show more than the original did vertically
+as well as horizontally. Whether that is better than scenery winking out is a
+judgement for whoever is playing. It is also cheap to test -- one hook, one
+multiplier -- and unlike the aspect it has a plausible path to the culling.
+
+If it does not move the boundary either, then the culling is not derived from
+the camera at all and the next stop is the object-visibility code itself, found
+by tracing what reads the camera object around the point where geometry is
+accepted or rejected. That is a real reverse-engineering task and should be
+entered deliberately rather than drifted into.
