@@ -171,9 +171,22 @@ which are the game's signature effects and the usual casualties under HLE
 renderers. Audio through ultramodern.
 
 **Gate:** the first three levels play start to finish with correct visuals,
-audio and Controller Pak saves.
+audio and Controller Pak saves. *Not met.* The graphics microcode is confirmed
+and the annotation cleared, audio works through a recompiled copy of the game's
+own microcode, and Controller Pak saving is done — but nobody has played three
+levels, so the part of the gate that is actually about the game is untested. See
+[PHASE05-FINDINGS.md](PHASE05-FINDINGS.md) and
+[CONTROLLER-PAK-FINDINGS.md](CONTROLLER-PAK-FINDINGS.md).
 
-### 06 — Enhancements and release
+**Phase 06 was entered anyway, and that is a departure from the rule at the top
+of this section.** It was taken deliberately rather than drifted into: the
+remainder of this gate is a playtesting result, playtesting needs the launcher
+and rebindable controls that phase 06 carries, and there was no way to reach the
+one through anything but the other. The cost is that the enhancement phase was
+built on an unfinished correctness phase, and phase 07 opens by paying that
+back.
+
+### 06 — Enhancements and release ✅
 
 Widescreen and arbitrary internal resolution through RT64.
 **[RecompFrontend](https://github.com/N64Recomp/RecompFrontend)** for the
@@ -184,13 +197,104 @@ alone. CI that builds without a ROM. A first-run flow that explains the ROM
 requirement to someone who has read none of this.
 
 **Gate:** a stranger with a dump and no context can build it and play it.
+*Met on the play half, and only documented on the build half.* `v0.1.0-alpha`
+is published with a Windows x64 archive, so a stranger with a dump does not have
+to build anything; `BUILDING.md` describes the pipeline but nobody outside this
+machine has run it, which is what phase 07's CI item is for.
 
-### 07 — Beyond parity
+Two things did not go to plan, and both are worth recording rather than
+quietly absorbing.
 
-Deliberately not specified yet. The sibling ports each found their real
-enhancement work only after playing the thing — Wave Race's widescreen 2D
-anchoring and its vertex interpolation were not foreseeable from a plan. This
-section gets written at the 06 gate, from defects observed in motion.
+The frontend arrived early. Phase 03's amendment had already established it as a
+dependency rather than an enhancement, and it was then brought forward again
+ahead of phase 05's gate for a plainer reason: playtesting needs a launcher and
+rebindable controls, and the alternative was driving the game with a hardcoded
+keyboard map. See [FRONTEND-FINDINGS.md](FRONTEND-FINDINGS.md).
+
+**High frame rate is implemented, understood, and off.** RT64's interpolation
+needs no per-game work — it matches transforms automatically when a ROM does not
+tag them — and the physics question is settled by measurement rather than
+argument: the extra frames are generated on the renderer's side of the display
+list, and the game's own audio production rate is unchanged in every
+configuration. What blocks it is that the presentation mode it requires
+(`SkipBuffering`, or `PresentEarly`) presents the framebuffer the game has just
+drawn, which means presenting one the game may still be drawing into. On this
+game that is visible: whole regions of the scene missing, HUD digits sliced off.
+It ships as `Console` and stays reachable through `RAYMAN2_PRESENT`. See
+[HIGH-FRAMERATE.md](HIGH-FRAMERATE.md).
+
+Delivered beyond the original list: Controller Pak saving emulated at the joybus
+level ([CONTROLLER-PAK-FINDINGS.md](CONTROLLER-PAK-FINDINGS.md)), and per-session
+debug reports written for a playtester to send and an assistant to read
+([DEBUG-REPORTS.md](DEBUG-REPORTS.md)).
+
+### 07 — Coverage and hardening
+
+The old phase 07 said it would be written at the 06 gate, from defects observed
+in motion, because the sibling ports each found their real work only after
+playing the thing. That is where this project now is, with one difference worth
+stating plainly at the top:
+
+**This port has been tested but barely played.** Every claim in `docs/` rests on
+instrumented runs of a few minutes, mostly automated, mostly in the first level.
+Phase 05's gate — the first three levels start to finish — has not been met by a
+human at the controls. Almost everything below is downstream of fixing that.
+
+The sequence matters more than the list. Bug-fixing without a regression net is
+how ports of this kind quietly rot: a fix for level seven breaks level two and
+nobody learns until a player says so.
+
+**First, make regressions detectable.** Roughly an afternoon each, and all of it
+pays for itself the first time something breaks:
+
+- A scripted smoke run: boot, load a save, render a fixed number of frames, hash
+  the framebuffer, and assert the session report contains no ERROR lines. It
+  catches "the port stopped booting" and "the picture changed" with nobody
+  watching.
+- CI that builds without a ROM. This was on the phase 06 list and did not get
+  done. It is what stops "works on this machine" from becoming a category of
+  bug, and it is the missing half of the 06 gate.
+- A library of Controller Pak images parked at known points, so reaching a level
+  costs seconds rather than an hour of replay.
+
+**Then play it, all of it, and let the reports decide the rest.** This is the
+only instrument that finds the risk the plan has named from the start —
+F3DEX 1.x command-level defects, which are invisible to code reading and to any
+test written in advance, and which surface as one wrong-looking wall in a level
+nobody has reached. Finding out early is what protects the decision recorded
+under "What would make this project stop".
+
+**Alongside that, close the named graphics risks deliberately.** Fog and
+transparent water are this game's signature effects and phase 00 flagged them as
+the usual casualties under an HLE renderer. They are checkable at known
+locations in a single session, and the answer decides whether phase 05's gate is
+real rather than assumed.
+
+**Known open items**, none of which should be started before the two steps
+above:
+
+- Frame interpolation tears (above). The 144 Hz measurement has not been taken;
+  the fix may belong upstream in RT64 rather than here.
+- Controller Pak coverage is create-and-read only. Deleting a save, a second
+  slot, a full pak and a corrupted pak are all untested paths through the
+  cartridge's own filesystem.
+- The Rumble Pak is given up for the Controller Pak, as it would be on a console
+  with one accessory slot. Serving both at once from the joybus layer is
+  possible — their address ranges do not overlap — and is a deliberate deviation
+  from hardware if taken.
+- Audio *rate* is verified; audio *content* is not. Music, effects and cutscene
+  synchronisation across the game are unexamined.
+- Windows only. Linux and macOS are real work, not a checkbox.
+- Performance headroom is unknown on anything but one Intel Iris Xe laptop.
+- librecomp's mod system is wired and never exercised.
+
+**Gate (1.0):** the game completes start to finish on a fresh install, driven by
+someone who has read none of this, with no crash and no visual defect a player
+would think worth reporting — on at least two machines with different GPU
+vendors.
+
+The two-vendor clause is not padding. An Intel-only sample is how renderer bugs
+reach users, and this project's largest unpriced risk lives in the renderer.
 
 ## What would make this project stop
 
