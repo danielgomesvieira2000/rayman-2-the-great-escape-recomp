@@ -234,3 +234,15 @@ text = "rayman2_yield_in_spin(rdram);"
 func = "func_800038C0"
 at_func_start = true
 text = "rayman2_scale_draw_distance(rdram, ctx);"
+
+# The return of the same guPerspective, where the matrix is put back.
+#
+# 0x80003A80 is its `jr $ra`. Hooking before it means the matrix at the pointer
+# captured on the way in has been fully written, and the horizontal scale can be
+# divided back out -- so the widened aspect reaches whatever the game culls with
+# while the matrix handed to the RSP is the one an unmodified call would have
+# produced. RT64's Expand then widens that, exactly as it does today.
+[[patches.hook]]
+func = "func_800038C0"
+before_vram = 0x80003A80
+text = "rayman2_restore_projection_width(rdram, ctx);"

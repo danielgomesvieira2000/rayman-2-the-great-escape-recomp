@@ -134,6 +134,8 @@ namespace {
 //                                                  turned off to compensate
 //   the seam stays                              -> the culling is somewhere
 //                                                  else entirely
+std::atomic<uint32_t> g_perspective_mtx{0};
+std::atomic<float> g_perspective_k{1.0f};
 std::atomic<float> g_aspect_multiplier{1.0f};
 std::atomic<float> g_observed_aspect{300.0f / 224.0f};
 
@@ -170,6 +172,10 @@ extern "C" void rayman2_scale_draw_distance(uint8_t* rdram, recomp_context* ctx)
             uint32_t aspect_bits = 0;
             std::memcpy(&aspect_bits, &aspect, sizeof(aspect_bits));
             ctx->r7 = static_cast<int32_t>(aspect_bits);
+
+            // Remembered for the return hook, which puts [0][0] back.
+            g_perspective_mtx.store(static_cast<uint32_t>(ctx->r4), std::memory_order_relaxed);
+            g_perspective_k.store(aspect_multiplier, std::memory_order_relaxed);
         }
     }
 
@@ -199,8 +205,7 @@ extern "C" void rayman2_scale_draw_distance(uint8_t* rdram, recomp_context* ctx)
 
 namespace rayman2 {
 
-// Translate the Aspect Ratio setting into "the game renders wide", instead of
-// "the renderer widens what the game drew".
+// Widen what the game CULLS against, and nothing else.
 //
 // Those two produce the same framing and are not the same thing. RT64's Expand
 // widens the view on its own side of the display list, so the game goes on
@@ -229,51 +234,14 @@ namespace rayman2 {
 // to the tab, which is what makes repurposing the setting possible without
 // forking the frontend.
 void update_widescreen_policy(int window_width, int window_height) {
-    // OFF BY DEFAULT, and it has to be, because the last step does not work.
-    //
-    // The plan needs the presentation to stretch the game's 4:3 framebuffer
-    // across the window, which is what PresentFillMode::Stretch is for. That
-    // field is dead: the fork added pfm_option to GraphicsConfig, serialises it
-    // and documents it, but nothing reads it -- not recompui, which is what
-    // actually configures RT64, and not ultramodern. Setting it changes
-    // nothing, so turning this on today converts a correctly-filled widescreen
-    // frame into a pillarboxed one. That is a worse picture in exchange for
-    // better culling, which is not a trade worth making silently.
-    //
-    // RAYMAN2_WIDESCREEN=game turns it on for testing. It comes out from behind
-    // this gate when the presentation can be told to stretch -- see
-    // docs/issues/001.
-    static const bool enabled = []() {
-        const char* mode = std::getenv("RAYMAN2_WIDESCREEN");
-        return (mode != nullptr) && (std::strcmp(mode, "game") == 0);
-    }();
-    if (!enabled) {
-        g_aspect_multiplier.store(1.0f, std::memory_order_relaxed);
-        return;
-    }
-
     if (window_width <= 0 || window_height <= 0) {
         return;
     }
 
     namespace renderer = ultramodern::renderer;
-    renderer::GraphicsConfig config = renderer::get_graphics_config();
+    const renderer::GraphicsConfig& config = renderer::get_graphics_config();
 
-    // Telling ours apart from the player's. Both read Original once applied,
-    // but the frontend resets pfm_option to its default whenever it applies
-    // anything, so Original alongside Stretch can only be this function's work.
-    const bool ours = (config.ar_option == renderer::AspectRatio::Original)
-                   && (config.pfm_option == renderer::PresentFillMode::Stretch);
-
-    static bool widescreen = false;
-    if (config.ar_option == renderer::AspectRatio::Expand) {
-        widescreen = true;
-    }
-    else if (!ours) {
-        widescreen = false;
-    }
-
-    if (!widescreen) {
+    if (config.ar_option != renderer::AspectRatio::Expand) {
         g_aspect_multiplier.store(1.0f, std::memory_order_relaxed);
         return;
     }
@@ -293,13 +261,64 @@ void update_widescreen_policy(int window_width, int window_height) {
         multiplier = 2.5f;
     }
     g_aspect_multiplier.store(multiplier, std::memory_order_relaxed);
-
-    if (config.ar_option != renderer::AspectRatio::Original ||
-        config.pfm_option != renderer::PresentFillMode::Stretch) {
-        config.ar_option = renderer::AspectRatio::Original;
-        config.pfm_option = renderer::PresentFillMode::Stretch;
-        renderer::set_graphics_config(config);
-    }
 }
 
 } // namespace rayman2
+
+// ---------------------------------------------------------------------------
+// Undo the widening in the matrix, keep it everywhere else
+// ---------------------------------------------------------------------------
+//
+// The widened aspect above is there so the game's own visibility test sees the
+// frame the player is actually looking at. It must NOT reach the projection
+// matrix, because RT64's Expand already widens that -- the two would multiply
+// and the view would come out a third too wide.
+//
+// So the matrix is put back. guPerspective's only aspect-dependent term is
+// [0][0], the horizontal scale, which is cot(fovy/2) / aspect: widening aspect
+// by k divides it by k, and multiplying it back by k restores exactly the
+// matrix an unmodified call would have produced. perspNorm is derived from near
+// and far alone and is untouched.
+//
+// An N64 Mtx is 4x4 of s15.16 stored split: sixteen big-endian halfwords of
+// integer parts, then sixteen of fractional parts. [0][0] is therefore the
+// halfword at 0 and the halfword at 32.
+//
+// The saved pointer is what makes this work at the return: $a0 is long gone by
+// then, so the start hook records it.
+
+extern "C" void rayman2_restore_projection_width(uint8_t* rdram, recomp_context* ctx) {
+    const float k = g_perspective_k.exchange(1.0f, std::memory_order_relaxed);
+    const uint32_t mtx = g_perspective_mtx.exchange(0, std::memory_order_relaxed);
+    if (k == 1.0f || mtx == 0) {
+        return;
+    }
+
+    const int64_t base = static_cast<int32_t>(mtx);
+
+    const int32_t integer = static_cast<int16_t>(MEM_H(0, base));
+    const uint32_t fraction = static_cast<uint16_t>(MEM_H(32, base));
+    const int32_t raw = (integer << 16) | static_cast<int32_t>(fraction);
+
+    const double restored = (static_cast<double>(raw) / 65536.0) * static_cast<double>(k);
+
+    // A term this large means the arithmetic has gone wrong somewhere; leaving
+    // the matrix alone is always safe, and a silently corrupted projection is
+    // not.
+    if (!(restored > -32768.0 && restored < 32768.0)) {
+        return;
+    }
+
+    const int32_t out = static_cast<int32_t>(restored * 65536.0);
+    MEM_H(0, base) = static_cast<int16_t>(out >> 16);
+    MEM_H(32, base) = static_cast<int16_t>(out & 0xFFFF);
+
+    {
+        static const bool on = std::getenv("RAYMAN2_DDPROBE") != nullptr;
+        static int remaining = 6;
+        if (on && remaining-- > 0) {
+            std::fprintf(stderr, "[rayman2] mtx 0x%08X [0][0] %.5f -> %.5f (k=%.4f)\n",
+                         mtx, static_cast<double>(raw) / 65536.0, restored, static_cast<double>(k));
+        }
+    }
+}

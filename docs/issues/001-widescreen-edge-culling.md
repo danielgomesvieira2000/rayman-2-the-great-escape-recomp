@@ -1,8 +1,7 @@
 # 001 — Geometry culled at the edges in widescreen
 
-**Status:** open, and blocked on something else. The fix is written and behind
-a gate; it cannot be turned on until the presentation can be told to stretch,
-because `pfm_option` turns out to be dead code.
+**Status:** fixed, on by default, verified numerically. One check outstanding:
+that the framing is unchanged, which is a glance during play.
 
 ---
 
@@ -240,3 +239,43 @@ One of:
     written back to its un-widened form after `guPerspective` builds it. That
     works only if the game culls from the camera rather than from the matrix it
     just produced, which is not yet known and is one more experiment.
+
+## The fix as shipped
+
+The anamorphic route was abandoned: it produced a widescreen render displayed in
+a 4:3 window, which is a worse picture than the one it replaced. The picture has
+to *be* widescreen.
+
+So RT64 keeps doing exactly what it does today -- Expand, filling the window --
+and only the game's frustum changes. Two hooks on `guPerspective`:
+
+  * **on the way in**, the aspect argument is replaced with the display's, so
+    everything the game derives from its frustum, culling included, is computed
+    against the frame the player is actually looking at;
+  * **on the way out**, the projection matrix's `[0][0]` is multiplied back, so
+    the matrix handed to the RSP is the one an unmodified call would have
+    produced and RT64's own widening lands on top of it exactly as before.
+
+`[0][0]` is the only aspect-dependent term guPerspective writes; `perspNorm`
+comes from near and far alone.
+
+Verified with `RAYMAN2_DDPROBE=1`:
+
+    guPerspective fovy=69.644 aspect=1.7778 near=32.000 far=8192.000
+    mtx 0x800E5F38 [0][0] 0.80865 -> 1.07341 (k=1.3274)
+
+1.3393 became 1.7778, the display aspect, and 0.80865 -- which is
+cot(fovy/2)/1.7778 -- was restored to 1.07341, which is cot(fovy/2)/1.3393. That
+is the un-widened value to five decimal places.
+
+Also gone: the `PresentFillMode` blocker no longer applies, because nothing now
+depends on the presentation stretching anything.
+
+## Still to confirm
+
+That the framing is identical to before. The numbers say it must be, and the
+intro renders full-width with no seam and both mountains whole -- but the
+cinematic camera moves continuously, so captures taken four seconds apart in two
+runs land at different points within the same subtitle, and apparent size cannot
+be compared between them. It is obvious to a person playing: if the field of
+view looks unchanged from the last build, it is right.
