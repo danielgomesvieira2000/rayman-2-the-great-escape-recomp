@@ -26,6 +26,8 @@
 #include "ultramodern/input.hpp"
 #include "ultramodern/threads.hpp"
 
+#include "controller_pak.h"
+
 #include "librecomp/game.hpp"
 #include "librecomp/rsp.hpp"
 
@@ -209,6 +211,23 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 
 // Pumps the OS event queue. Runs on the thread that created the window.
 void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
+    // Persist Controller Pak writes about once a second.
+    //
+    // This runs on the thread that pumps events rather than on the game thread,
+    // which is the point: the game writes the pak from inside a blocking
+    // libultra transaction, and doing file I/O there would put a disk write in
+    // the middle of a transfer the game is timing. flush() is a cheap no-op
+    // when nothing has changed, so the common case costs a comparison.
+    {
+        using clock = std::chrono::steady_clock;
+        static clock::time_point next_flush{};
+        const clock::time_point now = clock::now();
+        if (now >= next_flush) {
+            next_flush = now + std::chrono::seconds(1);
+            rayman2::pak::flush();
+        }
+    }
+
 #ifdef RAYMAN2_ENABLE_FRONTEND
     rayman2::frontend_handle_events();
     return;
@@ -466,10 +485,25 @@ void set_rumble_unused(int, bool) {
 // Saying "no pak" is a state the shipped game had to handle, because a player
 // can always run it without one. When the Pfs side is actually implemented,
 // this is the line to change back, and the two must change together.
+// What is plugged into each controller port.
+//
+// Port 1 has a controller with a Controller Pak in it; the other three are
+// empty. ultramodern turns the pak field into OSContStatus.status -- bit 0,
+// CONT_CARD_ON -- and Rayman 2 gates its whole save path on that bit, so
+// reporting Pak::None here is enough on its own to produce "No Controller Pak
+// found. The game will not be saved." however well the rest works.
+//
+// Reporting a Controller Pak deliberately gives up the Rumble Pak. ultramodern's
+// osMotorInit answers PFS_ERR_DEVICE unless the reported pak is a Rumble Pak,
+// which is the console's own behaviour: the controller has one slot, and a
+// player who wants to save takes the Rumble Pak out. Serving both at once from
+// the joybus layer is possible -- their address ranges do not overlap -- but it
+// is a deviation from hardware, and saving is what was asked for.
 ultramodern::input::connected_device_info_t get_connected_device_info(int controller_num) {
     if (controller_num == 0) {
         return { ultramodern::input::Device::Controller,
-                 ultramodern::input::Pak::None };
+                 rayman2::pak::present(0) ? ultramodern::input::Pak::ControllerPak
+                                          : ultramodern::input::Pak::None };
     }
     return { ultramodern::input::Device::None, ultramodern::input::Pak::None };
 }
@@ -586,6 +620,10 @@ int main(int argc, char** argv) {
         const std::filesystem::path cfg = app_folder_path();
         std::filesystem::create_directories(cfg, ec);
         recomp::register_config_path(cfg);
+        // The Controller Pak images live beside the rest of the configuration.
+        // This has to happen before the game starts, because the first thing it
+        // does with the pak is read it.
+        rayman2::pak::set_storage_directory(cfg);
         std::fprintf(stderr, "[rayman2] config path: %s\n", cfg.string().c_str());
     }
 
@@ -758,6 +796,18 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
     rayman2_stop_thread_sampler();
+
+    // Persist what the session changed.
+    //
+    // Both of these have a saving path of their own during play -- the pak
+    // flushes on a timer in update_gfx, and the Controls tab writes its
+    // bindings when it closes -- so this is the pass that catches a player who
+    // changed something and then quit without closing the menu, and the last
+    // second of pak writes before the window went away.
+    rayman2::pak::flush();
+#ifdef RAYMAN2_ENABLE_FRONTEND
+    rayman2::frontend_shutdown();
+#endif
     std::fprintf(stderr, "[rayman2] recomp::start returned\n");
 
 #ifdef _WIN32

@@ -125,6 +125,10 @@ the same frame count as one that works.
 
 The gate is the first three levels playing start to finish with correct visuals,
 audio and Controller Pak saves. Remaining: the fog and transparent water that
-phase 00 flagged as the usual casualties under an HLE renderer, F3DEX 1.x
-command-level behaviour, and the Controller Pak path, which currently reports no
-pak at all.
+phase 00 flagged as the usual casualties under an HLE renderer, and F3DEX 1.x
+command-level behaviour.
+
+The Controller Pak is done. It is emulated at the joybus level, underneath the
+cartridge's own recompiled filesystem, so what the port stores is a real pak
+image rather than an approximation of one. See
+[CONTROLLER-PAK-FINDINGS.md](CONTROLLER-PAK-FINDINGS.md).

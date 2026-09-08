@@ -33,6 +33,15 @@
  *                  itself, so this needs to agree with however phase 03 wires
  *                  the VI/timer, not simply be dropped.
  *
+ * A fourth joined them with the Controller Pak:
+ *
+ *   __osSiRawStartDma  Moves the 64-byte PIF RAM to or from the controller bus.
+ *                  It is named on purpose, so that the game's own Controller
+ *                  Pak filesystem is recompiled and runs, with the port
+ *                  answering only the joybus transactions underneath it. See
+ *                  src/si_pak.cpp and the note beside the symbol in
+ *                  recomp/symbol_addrs.txt.
+ *
  * It is force-included by scripts/build-recompiled-lib.sh (-include), because
  * the generated sources include only "recomp.h" and "funcs.h" and must never be
  * hand-edited.
@@ -51,6 +60,7 @@ void __osGetSR_recomp(uint8_t* rdram, recomp_context* ctx);
 void __osSiDeviceBusy_recomp(uint8_t* rdram, recomp_context* ctx);
 void __osSetSR_recomp(uint8_t* rdram, recomp_context* ctx);
 void __osSetCompare_recomp(uint8_t* rdram, recomp_context* ctx);
+void __osSiRawStartDma_recomp(uint8_t* rdram, recomp_context* ctx);
 
 /* Diagnostic, called from a [[patches.hook]] injected into the recompiled code.
    Declared here because this header is force-included into every generated

@@ -160,6 +160,11 @@ set(PORT_SOURCES
     src/rsp.cpp
     RecompiledRsp/rsp_audio.cpp
     src/port_runtime.cpp
+    # Controller Pak: the 32 KiB backing store and the joybus transactions that
+    # reach it. Both builds get these -- saving is not a frontend feature, and
+    # the headless build is what the pak was brought up under.
+    src/controller_pak.cpp
+    src/si_pak.cpp
     src/register_sections.cpp
     src/spin_yield.cpp
     src/crash_report.cpp

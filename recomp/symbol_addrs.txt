@@ -391,11 +391,48 @@ osContGetReadData   = 0x80008878; // type:func
 // channel at the front, version, dir_size and inode_table in the middle, and
 // the bank count and active bank at the end.
 //
-// librecomp answers PFS_ERR_NOPACK to every Pfs entry point, which is not a
-// stub in the sense of being unfinished -- it is the answer the console gives
-// when no Controller Pak is inserted, and a game that shipped had to handle it.
-// So the game takes a path it was always able to take.
-osPfsInitPak = 0x8000A320; // type:func
+// It is deliberately NOT named. librecomp answers PFS_ERR_NOPACK to every Pfs
+// entry point, which is not a stub in the sense of being unfinished -- it is
+// the answer the console gives when no Controller Pak is inserted, and a game
+// that shipped had to handle it. That was the right answer while the port had
+// no pak at all, and it is the wrong one now: naming this symbol replaces the
+// cartridge's own PFS implementation with a refusal, and the game can never
+// save.
+//
+// Leaving it unnamed recompiles the game's own copy, and with it the whole
+// libultra filesystem underneath -- __osPfsGetStatus, __osContRamRead and
+// __osContRamWrite, the bank select, the ID and inode checksums, the note
+// table. That code is far better tested than anything this port could write,
+// and because it is the code that shipped, the bytes it leaves in the pak image
+// are a real Controller Pak image rather than an approximation of one. All the
+// port has to supply is the wire underneath it: see __osSiRawStartDma below.
+//
+//     osPfsInitPak = 0x8000A320;   // deliberately not named
+
+// __osSiRawStartDma -- the wire the whole Controller Pak stands on.
+//
+// Identified from the body: it takes a direction in $a0 and a buffer in $a1,
+// faults the buffer if it is not word-aligned, spins on __osSiDeviceBusy,
+// writes back or invalidates 0x40 bytes of the caller's buffer through
+// osWritebackDCache / osInvalDCache, converts the buffer to a physical address
+// and stores it to SI_DRAM_ADDR (0xA4800000), then stores the PIF RAM address
+// 0x1FC007C0 to either SI_PIF_ADDR_RD64B (0xA4800004) for a read or
+// SI_PIF_ADDR_WR64B (0xA4800010) for a write. That is __osSiRawStartDma and
+// nothing else: 0x40 bytes is exactly the PIF RAM, and the two store addresses
+// are the two directions of the only transfer that touches it.
+//
+// This name is in N64Recomp's `ignored_funcs` and NOT in `reimplemented_funcs`,
+// so naming it does not hand the job to librecomp -- it drops the function and
+// obliges the port to define __osSiRawStartDma_recomp. That is the point. The
+// port answers the joybus transactions in src/si_pak.cpp, which is a far
+// smaller surface than the filesystem above it: two commands, read block and
+// write block, against a 32 KiB backing store.
+//
+// The game reaches it as osPfsInitPak -> func_8000A6B0 (__osPfsGetStatus) ->
+// __osSiRawStartDma(OS_WRITE) -> osRecvMesg -> __osSiRawStartDma(OS_READ) ->
+// osRecvMesg. Both directions have to post an SI completion or that first
+// osRecvMesg never returns and the game hangs holding the SI semaphore.
+__osSiRawStartDma = 0x800115C0; // type:func
 
 // osSetIntMask -- the fourth seam, and the first one reached from real game code.
 //
