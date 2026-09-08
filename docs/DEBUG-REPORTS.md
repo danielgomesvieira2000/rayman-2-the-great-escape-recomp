@@ -172,6 +172,12 @@ half an hour.
     F9  (a key, not a variable)        capture a graphics issue: screenshot,
                                        VI framebuffer, settings and an issue
                                        stub, into debug-report/captures
+    RAYMAN2_DEVMODE=1                  RT64's developer UI and frame inspector
+                                       on F1 (there is no checkbox for this)
+    RAYMAN2_DDPROBE=1                  report the game's projection arguments
+    RAYMAN2_DRAWDIST=<n>               scale the projection far plane; see
+                                       docs/issues/002, it changes nothing
+                                       visible in this game
     RAYMAN2_PRESENT=skipbuffering      presentation mode; unlocks RT64 frame
                     |presentearly      interpolation, but tears on this game.
                                        Default (unset) is console.

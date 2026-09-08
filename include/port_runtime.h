@@ -66,6 +66,11 @@ void __osSiRawStartDma_recomp(uint8_t* rdram, recomp_context* ctx);
    Declared here because this header is force-included into every generated
    source, which is what makes the injected text compile. See
    src/debug_node.cpp. */
+/* Draw distance: called from a [[patches.hook]] at the start of the game's
+   guPerspective, where it scales the far-plane argument before the projection
+   is built. See src/draw_distance.cpp. */
+void rayman2_scale_draw_distance(uint8_t* rdram, recomp_context* ctx);
+
 void rayman2_debug_node(uint8_t* rdram, uint32_t node_addr);
 void rayman2_debug_assert(uint8_t* rdram, uint32_t ra);
 void rayman2_debug_site(uint8_t* rdram, uint32_t site);

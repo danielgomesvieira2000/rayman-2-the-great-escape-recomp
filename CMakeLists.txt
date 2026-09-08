@@ -167,6 +167,8 @@ set(PORT_SOURCES
     src/si_pak.cpp
     # F9: capture a frame's worth of evidence for a graphics issue.
     src/capture.cpp
+    # Draw distance, applied at the game's own guPerspective.
+    src/draw_distance.cpp
     src/register_sections.cpp
     src/spin_yield.cpp
     src/crash_report.cpp

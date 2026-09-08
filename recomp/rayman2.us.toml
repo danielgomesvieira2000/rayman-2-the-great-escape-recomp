@@ -216,3 +216,21 @@ func = "func_80025D30"
 before_vram = 0x80025E14
 text = "rayman2_yield_in_spin(rdram);"
 
+
+# Draw distance.
+#
+# func_800038C0 is libultra's guPerspective, identified from its arithmetic:
+# fovy multiplied by a double-precision PI/360, sine over cosine for the
+# tangent, and the projection depth terms (n+f)/(n-f) and 2nf/(n-f) with a
+# -1.0f alongside them. It has two call sites, one of them inside func_8009989C
+# in the main segment, which is the game's own camera code.
+#
+# The hook runs at_func_start, before the prologue allocates its frame, so
+# ctx->r29 is still the caller's stack pointer and the fifth, sixth and seventh
+# arguments -- near, far and scale -- are at 0x10, 0x14 and 0x18 from it.
+# src/draw_distance.cpp scales the far plane there, which also keeps perspNorm
+# consistent because guPerspective derives it from the same numbers.
+[[patches.hook]]
+func = "func_800038C0"
+at_func_start = true
+text = "rayman2_scale_draw_distance(rdram, ctx);"
