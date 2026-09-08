@@ -31,16 +31,51 @@
 
 namespace {
 
-// Where Rayman's health lives. NOT YET KNOWN.
+// Where Rayman's health lives.
 //
-// Zero means "no address", and every health cheat is inert until there is one.
-// It is deliberately not a guess: writing a plausible-looking address every
-// frame would corrupt whatever actually lives there, and the failure would look
-// like anything at all.
+// Found with src/memory_search.cpp: an F5/F6/F7 search while playing narrowed
+// 2,097,152 words to four, three of which are IEEE-754 floats that move
+// together and stay in exact proportion across sessions -- 50.0, 15.0 and 50.0
+// with Rayman undamaged, 10.0, 3.0 and 10.0 after taking hits. One health
+// quantity, mirrored and derived.
 //
-// RAYMAN2_HEALTH_ADDR=0x8xxxxxxx supplies one without a rebuild, which is how a
-// candidate from src/memory_search.cpp gets confirmed before it is baked in.
+// Watching all three through a demo, with the cheat off, settled which is which
+// in one run -- the attract demo damages Rayman, so no player was needed:
+//
+//     0x800EF6D4   0x80231870   0x802318E0
+//         50.000       15.000       50.000
+//         43.333       13.000       43.333
+//         36.667       11.000       36.667
+//         30.000        9.000       30.000
+//          ...            ...          ...
+//          3.333        1.000        3.333
+//          0.000        0.000        0.000   <- death
+//         50.000       15.000       50.000   <- respawn
+//
+// 0x80231870 IS THE HEALTH. It steps in clean integers, 15 down to 1, two per
+// hit; the other two are a display value derived from it, exactly ten thirds of
+// it at every sample. Full health is 15.
+//
+// The first attempt used 0x800EF6D4 on the reasoning that a value in static data
+// is more likely canonical than a field in a heap object. That reasoning was
+// wrong -- it is the derived copy, the game recomputes it every frame, and
+// pinning it changed nothing except the number in the mirror. Measuring which
+// one moves first would have taken one run, and did, once it was tried.
+//
+// COMPILED IN rather than left to an environment variable, which is the second
+// lesson from this. The first attempt shipped the address as a variable only,
+// so the toggle in the tab did nothing when the game was launched normally --
+// correctly reporting "the address is not known", which is true and useless to
+// somebody who has just turned a cheat on and died. A cheat has to work when it
+// is switched on.
 constexpr uint32_t kHealthAddressUnknown = 0;
+constexpr uint32_t kHealthAddressDefault = 0x80231870u;
+
+// Health is a float, and "hold at the highest seen" needs a sane range or it
+// latches onto whatever garbage is at the address before a level has loaded and
+// holds health at 1e30 forever. Rayman's full health reads 15.
+constexpr float kHealthMin = 0.0f;
+constexpr float kHealthMax = 100.0f;
 
 std::atomic<bool> g_infinite_health{false};
 std::atomic<uint32_t> g_health_address{kHealthAddressUnknown};
@@ -71,9 +106,9 @@ int configured_health_width() {
                 return static_cast<int>(parsed);
             }
             std::fprintf(stderr, "[rayman2] RAYMAN2_HEALTH_WIDTH=%s is not 1, 2 or 4;"
-                                 " using 1\n", env);
+                                 " using 4\n", env);
         }
-        return 1;
+        return 4;
     }();
     return width;
 }
@@ -93,7 +128,7 @@ uint32_t configured_health_address() {
             std::fprintf(stderr, "[rayman2] RAYMAN2_HEALTH_ADDR=%s is not a usable RDRAM address;"
                                  " ignoring it\n", env);
         }
-        return kHealthAddressUnknown;
+        return kHealthAddressDefault;
     }();
     return address;
 }
@@ -278,8 +313,11 @@ void apply(uint8_t* rdram) {
             last = now;
             const int width = configured_health_width();
             const uint32_t value = read_value(rdram, address, width);
-            std::fprintf(stderr, "[rayman2] cheat: [0x%08X] = %u (0x%0*X, %d byte(s))\n",
-                         address, value, width * 2, value, width);
+            float as_float = 0.0f;
+            std::memcpy(&as_float, &value, sizeof(as_float));
+            std::fprintf(stderr, "[rayman2] cheat: [0x%08X] = 0x%0*X  %d  %.3f\n",
+                         address, width * 2, value, static_cast<int32_t>(value),
+                         static_cast<double>(as_float));
         }
     }
 
@@ -290,16 +328,35 @@ void apply(uint8_t* rdram) {
             return;
         }
 
+        // Full health, unless told otherwise. Known from the table above, so
+        // there is no need to wait for the game to have been at full health
+        // once before the cheat does anything.
+        if (std::getenv("RAYMAN2_HEALTH_FLOAT") == nullptr &&
+            std::getenv("RAYMAN2_HEALTH_VALUE") == nullptr &&
+            address == kHealthAddressDefault) {
+            const float full = 15.0f;
+            uint32_t bits = 0;
+            std::memcpy(&bits, &full, sizeof(bits));
+            write_value(rdram, address, configured_health_width(), bits);
+            return;
+        }
+
         int32_t target = configured_health_value();
         if (target < 0) {
             // No value given: hold at the highest seen, which is what full
             // health is as soon as the game has been at full health once.
-            const int32_t current =
-                static_cast<int32_t>(read_value(rdram, address, configured_health_width()));
+            const uint32_t raw = read_value(rdram, address, configured_health_width());
+            float as_float = 0.0f;
+            std::memcpy(&as_float, &raw, sizeof(as_float));
+
+            // Only a plausible health value may become the value held. For
+            // positive IEEE-754 floats the bit pattern orders the same way the
+            // number does, so the integer compare picks the largest float.
             int32_t best = g_health_value.load(std::memory_order_relaxed);
-            if (current > best) {
-                g_health_value.store(current, std::memory_order_relaxed);
-                best = current;
+            if (as_float > kHealthMin && as_float <= kHealthMax &&
+                static_cast<int32_t>(raw) > best) {
+                g_health_value.store(static_cast<int32_t>(raw), std::memory_order_relaxed);
+                best = static_cast<int32_t>(raw);
             }
             target = best;
         }
