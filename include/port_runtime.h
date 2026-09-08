@@ -71,10 +71,10 @@ void __osSiRawStartDma_recomp(uint8_t* rdram, recomp_context* ctx);
    is built. See src/draw_distance.cpp. */
 void rayman2_scale_draw_distance(uint8_t* rdram, recomp_context* ctx);
 
-/* The other half of the widescreen culling fix: puts the projection matrix's
-   horizontal scale back after guPerspective has built it, so the widened
-   aspect reaches the game's visibility test and not the renderer. */
-void rayman2_restore_projection_width(uint8_t* rdram, recomp_context* ctx);
+/* The other half of the widescreen culling fix: notes the projection matrix
+   guPerspective just widened, so it can be narrowed again when the display
+   list is handed to the renderer rather than immediately. */
+void rayman2_record_projection_matrix(uint8_t* rdram, recomp_context* ctx);
 
 void rayman2_debug_node(uint8_t* rdram, uint32_t node_addr);
 void rayman2_debug_assert(uint8_t* rdram, uint32_t ra);

@@ -37,6 +37,8 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
+#include <vector>
 
 #include "ultramodern/config.hpp"
 
@@ -134,6 +136,14 @@ namespace {
 //                                                  turned off to compensate
 //   the seam stays                              -> the culling is somewhere
 //                                                  else entirely
+struct Pending {
+    uint32_t address;
+    float factor;
+};
+
+std::mutex g_pending_mutex;
+std::vector<Pending> g_pending;
+
 std::atomic<uint32_t> g_perspective_mtx{0};
 std::atomic<float> g_perspective_k{1.0f};
 std::atomic<float> g_aspect_multiplier{1.0f};
@@ -234,34 +244,6 @@ namespace rayman2 {
 // to the tab, which is what makes repurposing the setting possible without
 // forking the frontend.
 void update_widescreen_policy(int window_width, int window_height) {
-    // OFF, because as written this pair of hooks cancels itself out.
-    //
-    // The idea was to widen the aspect on the way in so the game's culling saw
-    // the real frame, and put the projection matrix back on the way out so the
-    // renderer did not widen twice. Playtesting says the culling boundary did
-    // not move, and that is the answer to a question this could not settle from
-    // the outside: the game derives its visibility test from the projection
-    // MATRIX, not from the arguments it passed to build it. Restoring [0][0]
-    // therefore restores the narrow frustum for culling as well, and the two
-    // hooks add up to nothing.
-    //
-    // The matrix cannot serve both at once. It is the same number for what the
-    // game keeps and what the renderer draws, so the only consistent
-    // arrangement is for the matrix to BE the widened one and for RT64 to stop
-    // widening on top of it -- which needs the presentation to fill the window
-    // without an aspect scale, and that is `pfm_option`, which nothing reads.
-    // See docs/issues/001.
-    //
-    // RAYMAN2_WIDESCREEN=frustum turns the pair back on for experiments.
-    static const bool enabled = []() {
-        const char* mode = std::getenv("RAYMAN2_WIDESCREEN");
-        return (mode != nullptr) && (std::strcmp(mode, "frustum") == 0);
-    }();
-    if (!enabled) {
-        g_aspect_multiplier.store(1.0f, std::memory_order_relaxed);
-        return;
-    }
-
     if (window_width <= 0 || window_height <= 0) {
         return;
     }
@@ -315,38 +297,65 @@ void update_widescreen_policy(int window_width, int window_height) {
 // The saved pointer is what makes this work at the return: $a0 is long gone by
 // then, so the start hook records it.
 
-extern "C" void rayman2_restore_projection_width(uint8_t* rdram, recomp_context* ctx) {
+extern "C" void rayman2_record_projection_matrix(uint8_t* rdram, recomp_context* ctx) {
     const float k = g_perspective_k.exchange(1.0f, std::memory_order_relaxed);
     const uint32_t mtx = g_perspective_mtx.exchange(0, std::memory_order_relaxed);
     if (k == 1.0f || mtx == 0) {
         return;
     }
 
-    const int64_t base = static_cast<int32_t>(mtx);
+    std::lock_guard<std::mutex> lock(g_pending_mutex);
+    for (Pending& entry : g_pending) {
+        if (entry.address == mtx) {
+            entry.factor = k;   // rebuilt this frame; one narrowing still owed
+            return;
+        }
+    }
+    if (g_pending.size() < 16) {
+        g_pending.push_back(Pending{ mtx, k });
+    }
+}
 
-    const int32_t integer = static_cast<int16_t>(MEM_H(0, base));
-    const uint32_t fraction = static_cast<uint16_t>(MEM_H(32, base));
-    const int32_t raw = (integer << 16) | static_cast<int32_t>(fraction);
+namespace rayman2 {
 
-    const double restored = (static_cast<double>(raw) / 65536.0) * static_cast<double>(k);
-
-    // A term this large means the arithmetic has gone wrong somewhere; leaving
-    // the matrix alone is always safe, and a silently corrupted projection is
-    // not.
-    if (!(restored > -32768.0 && restored < 32768.0)) {
+// Narrow every projection matrix widened since the last display list.
+//
+// This is the whole trick. The game and the renderer need different values out
+// of the same sixteen numbers, and they can both have them because they read
+// them at different times: the game culls while it is building its frame, and
+// RT64 reads the matrix afterwards, when it parses the display list. So the
+// matrix stays wide for the whole of the game's frame -- which is what its
+// visibility test needs -- and is put back to what an unmodified guPerspective
+// would have produced at the moment it is handed over, which is what RT64's own
+// Expand needs.
+//
+// [0][0] is the only aspect-dependent term guPerspective writes. An N64 Mtx is
+// 4x4 of s15.16 stored split, sixteen halfwords of integer parts followed by
+// sixteen of fractional parts, so [0][0] is the halfword at 0 and the halfword
+// at 32.
+void narrow_pending_projections(uint8_t* rdram) {
+    if (rdram == nullptr) {
         return;
     }
 
-    const int32_t out = static_cast<int32_t>(restored * 65536.0);
-    MEM_H(0, base) = static_cast<int16_t>(out >> 16);
-    MEM_H(32, base) = static_cast<int16_t>(out & 0xFFFF);
+    std::lock_guard<std::mutex> lock(g_pending_mutex);
+    for (const Pending& entry : g_pending) {
+        const int64_t base = static_cast<int32_t>(entry.address);
 
-    {
-        static const bool on = std::getenv("RAYMAN2_DDPROBE") != nullptr;
-        static int remaining = 6;
-        if (on && remaining-- > 0) {
-            std::fprintf(stderr, "[rayman2] mtx 0x%08X [0][0] %.5f -> %.5f (k=%.4f)\n",
-                         mtx, static_cast<double>(raw) / 65536.0, restored, static_cast<double>(k));
+        const int32_t integer = static_cast<int16_t>(MEM_H(0, base));
+        const uint32_t fraction = static_cast<uint16_t>(MEM_H(32, base));
+        const int32_t raw = (integer << 16) | static_cast<int32_t>(fraction);
+
+        const double narrowed = (static_cast<double>(raw) / 65536.0) * static_cast<double>(entry.factor);
+        if (!(narrowed > -32768.0 && narrowed < 32768.0)) {
+            continue;
         }
+
+        const int32_t out = static_cast<int32_t>(narrowed * 65536.0);
+        MEM_H(0, base) = static_cast<int16_t>(out >> 16);
+        MEM_H(32, base) = static_cast<int16_t>(out & 0xFFFF);
     }
+    g_pending.clear();
 }
+
+} // namespace rayman2

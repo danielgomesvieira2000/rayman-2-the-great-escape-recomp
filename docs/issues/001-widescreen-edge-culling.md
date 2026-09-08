@@ -1,9 +1,8 @@
 # 001 — Geometry culled at the edges in widescreen
 
-**Status:** open. Two routes tried and both dead-ended, but between them they
-answered the question that was open: the game culls from the projection MATRIX,
-not from the arguments used to build it. That leaves exactly one arrangement
-that works, and it needs a small change in recompui.
+**Status:** fix built and on by default. Needs one look from a player: does the
+culling boundary reach the edge of the frame now, and is the field of view
+unchanged?
 
 ---
 
@@ -377,3 +376,45 @@ gets today.
 
 The risk to check is whether the game reads its projection matrix again after
 submitting the frame, which would see the narrowed value.
+
+## The fix as built
+
+`src/render_context.cpp` returns a thin wrapper around recompui's renderer
+context that overrides exactly one method:
+
+    void send_dl(const OSTask* task) override {
+        rayman2::narrow_pending_projections(rayman2::rdram_base());
+        inner_->send_dl(task);
+    }
+
+Around it:
+
+  * the `guPerspective` entry hook widens the aspect to the display's, so the
+    matrix the game builds -- and culls from -- describes the frame the player
+    is actually looking at;
+  * the return hook notes the matrix down rather than narrowing it, so it stays
+    wide for the whole of the game's frame;
+  * `narrow_pending_projections` multiplies `[0][0]` back at the handover, so
+    RT64 parses exactly the matrix it would have without any of this, and its
+    Expand widens that as before.
+
+No submodule is touched. The wrapper forwards `get_setup_result` and
+`get_chosen_api` explicitly, because the base class keeps those as protected
+members read by default getters and a shell that did not forward them would
+answer with its own uninitialised copies.
+
+The intro renders full width, with geometry reaching both edges and no seam.
+
+## What still wants a person
+
+Two questions a glance answers and a screenshot does not, because the cinematic
+camera moves continuously and frames captured seconds apart in different runs
+cannot be compared by apparent size:
+
+  * do the mountains now survive to the edge of the frame, instead of going at
+    the old 4:3 mark;
+  * is the field of view unchanged from before this change.
+
+If the answer to the second is no, the narrowing is not landing before RT64
+reads the matrix, and the next thing to check is whether the game rebuilds its
+projection after submitting.

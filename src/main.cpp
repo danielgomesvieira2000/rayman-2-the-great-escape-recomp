@@ -922,3 +922,13 @@ int main(int argc, char** argv) {
     rayman2::report::end_session(true);
     return EXIT_SUCCESS;
 }
+
+// The renderer wrapper in src/render_context.cpp needs RDRAM on the graphics
+// thread, and the gfx callbacks carry no rdram argument. Defined down here
+// rather than beside g_rdram so that nothing about the file's namespace
+// structure has to move to accommodate it.
+namespace rayman2 {
+    uint8_t* rdram_base() {
+        return g_rdram.load(std::memory_order_acquire);
+    }
+}

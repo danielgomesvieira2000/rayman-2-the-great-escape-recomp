@@ -22,6 +22,13 @@
 #endif
 
 #include "rhi/rt64_render_hooks.h"
+
+// src/draw_distance.cpp and src/main.cpp
+namespace rayman2 {
+    void narrow_pending_projections(uint8_t* rdram);
+    uint8_t* rdram_base();
+}
+
 #include "ultramodern/renderer_context.hpp"
 #include "ultramodern/ultramodern.hpp"
 #include "recompui/renderer.h"
@@ -161,6 +168,57 @@ void draw_hook_with_com(RenderCommandList* list, RenderFramebuffer* swap_chain_f
 
 } // namespace
 
+
+// A thin shell around recompui's renderer context, for one job.
+//
+// The game and RT64 need different values out of the same projection matrix.
+// The game culls against it while it builds a frame, and wants it widened so
+// that what it keeps matches the widescreen frame the player sees; RT64 reads
+// it afterwards, when it parses the display list, and wants the narrow one
+// because its own Expand multiplies it up to produce the displayed field of
+// view. Give either one the other's matrix and you get a third too much or a
+// third too little.
+//
+// They read it at different times, so both can have what they need. The matrix
+// stays wide for the whole of the game's frame and is narrowed here, at the
+// handover -- which is why this exists at all, and why it overrides exactly one
+// method and forwards the rest.
+//
+// The base class keeps setup_result and chosen_api as protected members with
+// default getters that read them, so those two have to be forwarded explicitly
+// or callers get this shell's uninitialised copies rather than the real
+// context's answers.
+class WidescreenCullingContext final : public ultramodern::renderer::RendererContext {
+public:
+    explicit WidescreenCullingContext(std::unique_ptr<ultramodern::renderer::RendererContext> inner)
+        : inner_(std::move(inner)) {}
+
+    bool valid() override { return inner_->valid(); }
+    ultramodern::renderer::SetupResult get_setup_result() const override { return inner_->get_setup_result(); }
+    ultramodern::renderer::GraphicsApi get_chosen_api() const override { return inner_->get_chosen_api(); }
+
+    bool update_config(const ultramodern::renderer::GraphicsConfig& old_config,
+                       const ultramodern::renderer::GraphicsConfig& new_config) override {
+        return inner_->update_config(old_config, new_config);
+    }
+
+    void enable_instant_present() override { inner_->enable_instant_present(); }
+
+    void send_dl(const OSTask* task) override {
+        rayman2::narrow_pending_projections(rayman2::rdram_base());
+        inner_->send_dl(task);
+    }
+
+    void send_dummy_workload(uint32_t fb_address) override { inner_->send_dummy_workload(fb_address); }
+    void update_screen() override { inner_->update_screen(); }
+    void shutdown() override { inner_->shutdown(); }
+    uint32_t get_display_framerate() const override { return inner_->get_display_framerate(); }
+    float get_resolution_scale() const override { return inner_->get_resolution_scale(); }
+
+private:
+    std::unique_ptr<ultramodern::renderer::RendererContext> inner_;
+};
+
 namespace rayman2 {
 
 
@@ -216,7 +274,7 @@ create_render_context(uint8_t* rdram,
         RT64::SetRenderHooks(RT64::GetRenderHookInit(), draw_hook_with_com, RT64::GetRenderHookDeinit());
     }
 
-    return context;
+    return std::make_unique<WidescreenCullingContext>(std::move(context));
 }
 
 } // namespace rayman2
