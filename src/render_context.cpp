@@ -29,6 +29,9 @@ namespace rayman2 {
     void narrow_pending_projections(uint8_t* rdram);
     uint8_t* rdram_base();
 
+    // src/frame_pacing.cpp -- see there for why this is at the end of send_dl.
+    void pace_frame();
+
     // Set once the renderer has actually presented a frame.
     //
     // src/rt64_context.cpp -- the non-frontend renderer -- has carried this
@@ -223,6 +226,9 @@ public:
     void send_dl(const OSTask* task) override {
         rayman2::narrow_pending_projections(rayman2::rdram_base());
         inner_->send_dl(task);
+        // Last thing before ultramodern signals dp_complete, which is what the
+        // game's frame loop is blocked on. docs/issues/004.
+        rayman2::pace_frame();
     }
 
     void send_dummy_workload(uint32_t fb_address) override { inner_->send_dummy_workload(fb_address); }

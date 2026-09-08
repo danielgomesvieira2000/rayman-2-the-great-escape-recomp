@@ -1,6 +1,7 @@
 # 004 — the game runs at double speed; the attract-mode demos show it
 
-**Status:** open. Diagnosed, not fixed.
+**Status:** fixed in `src/frame_pacing.cpp`. The residual inaccuracy is
+described under Fix.
 
 ## What is wrong
 
@@ -89,20 +90,68 @@ thing here that has not been measured rather than reasoned, and it is cheap.
 
 ## Fix
 
-Not written. The shape of it is to stop completing the RDP instantly: hold
-`dp_complete()` until the frame's deadline, so the game observes a plausible
-RDP duration and its own loop limits itself the way it did on hardware.
+`src/frame_pacing.cpp`, called at the end of `send_dl` in both renderer
+wrappers. That is the last thing that runs before ultramodern signals
+`dp_complete()`, so the port can delay the completion without touching the
+runtime at all -- and delaying there is faithful to the mechanism: RT64 is
+handed the work immediately and only the completion signal waits, which is
+exactly what an RDP that is still busy looks like from the game's side.
 
-Two things to be careful of, both of which argue for doing this in the port
-rather than reaching for a fixed 30 Hz cap:
+It is in **both** renderers on purpose. `src/render_context.cpp` is built with
+the frontend and `src/rt64_context.cpp` without it, and a fix in one with the
+measurements taken against the other is how this defect stayed invisible in the
+first place.
 
-* The rate is not a constant. The RDP took as long as the scene needed, so a
-  fixed cap would be wrong in both directions -- too fast for a heavy scene, too
-  slow for a light one. What the game is entitled to is a *plausible* completion
-  time, not a chosen frame rate.
-* Delaying the completion delays a message the whole frame handshake is waiting
-  on. docs/PHASE04-FINDINGS.md has the record of what happens when that message
-  goes missing: one display list, ever. It has to be late, never lost.
+Sleeping on that thread costs nothing that was being used: it exists to carry
+graphics tasks, audio tasks are dispatched from a different queue on a different
+thread -- `events.cpp` enqueues an `SpTaskAction` only for `M_GFXTASK` -- and
+the game itself is blocked waiting for precisely the completion being delayed.
+The completion is made **late, never lost**, which is the caution
+docs/PHASE04-FINDINGS.md paid for: a dropped one gives one display list, ever.
+
+### It is a cap, not a model of the RDP
+
+This is the honest limitation. A real RDP took as long as the scene needed; no
+cap reproduces that. A heavy scene ran slower than 30 on hardware and still runs
+at 30 here, so the residual error is in the direction of running slightly too
+fast in the heaviest scenes -- against the factor of two it replaces. Modelling
+the real thing would mean knowing how long each display list would have taken on
+an RDP, which the port does not know and RT64 does not report.
+
+Thirty because that is what the defect measures: exactly twice intended, against
+a 60 Hz field rate. `RAYMAN2_FRAMECAP=<n>` overrides it and `RAYMAN2_FRAMECAP=0`
+turns it off, so the comparison can be repeated without a rebuild.
+
+### Measured
+
+The headless build reports the game's own display-list rate, which is the
+quantity that was wrong -- one display list is one iteration of the game's loop:
+
+    RAYMAN2_FRAMECAP=0    display lists  +61/s   (the defect)
+    RAYMAN2_FRAMECAP=30   display lists  +30/s   steady, 30-31 across the run
+
+VI is unchanged at 60-61/s in both, which is the check that the field rate was
+not what moved.
+
+End to end in the shipped configuration, through several attract-mode demo
+cycles, presented frames a second while drawing:
+
+    before   a pegged 60.0
+    after    30.0 in 47 of 74 samples
+
+The samples that are not 30.0 are the seconds that straddle a demo starting or
+ending, which contain some idle title screen and some demo.
+
+One pre-existing pause was checked rather than assumed: the intro contains a
+stretch where the game submits nothing for fifteen seconds. It is fifteen
+seconds with the cap and fifteen without, so the cap does not lengthen it. It is
+not understood, and it is not this issue.
+
+### Still worth doing
+
+Time a demo against a console or an accurate emulator. The cap is derived from
+the reported factor of two rather than from a reference recording, so the
+factor is confirmed but the absolute rate is not.
 
 ## Relationship to issue 003
 

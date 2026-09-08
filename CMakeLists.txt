@@ -169,6 +169,10 @@ set(PORT_SOURCES
     src/capture.cpp
     # Draw distance, applied at the game's own guPerspective.
     src/draw_distance.cpp
+    # The frame cap that gives the game back the rate the RDP used to impose
+    # on it. Both builds, because a measurement taken against one and a fix
+    # shipped in the other is how docs/issues/004 stayed hidden.
+    src/frame_pacing.cpp
     src/register_sections.cpp
     src/spin_yield.cpp
     src/crash_report.cpp

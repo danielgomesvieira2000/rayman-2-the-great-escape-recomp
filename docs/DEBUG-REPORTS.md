@@ -258,6 +258,10 @@ half an hour.
                                        before yielding (default 1, max 100)
     RSPDMATRACE=1                      list every distinct 4 KB RDRAM page a
                                        microcode reads or writes
+    RAYMAN2_FRAMECAP=<n>               cap the game's loop at n display lists a
+                                       second (default 30; 0 disables it and
+                                       the game runs at double speed --
+                                       docs/issues/004)
     RAYMAN2_DDPROBE=1                  report the game's projection arguments
     RAYMAN2_DRAWDIST=<n>               scale the projection far plane; see
                                        docs/issues/002, it changes nothing
