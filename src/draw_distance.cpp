@@ -38,6 +38,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "ultramodern/config.hpp"
+
 #include "recomp.h"
 #include "port_runtime.h"
 
@@ -132,17 +134,20 @@ namespace {
 //                                                  turned off to compensate
 //   the seam stays                              -> the culling is somewhere
 //                                                  else entirely
+std::atomic<float> g_aspect_multiplier{1.0f};
+std::atomic<float> g_observed_aspect{300.0f / 224.0f};
+
 float aspect_scale() {
-    static const float value = []() {
+    static const float forced = []() {
         if (const char* env = std::getenv("RAYMAN2_ASPECT")) {
             const float parsed = static_cast<float>(std::atof(env));
             if (parsed >= 0.25f && parsed <= 4.0f) {
                 return parsed;
             }
         }
-        return 1.0f;
+        return 0.0f;   // nothing pinned; the menu decides
     }();
-    return value;
+    return (forced > 0.0f) ? forced : g_aspect_multiplier.load(std::memory_order_relaxed);
 }
 
 } // namespace
@@ -152,6 +157,12 @@ extern "C" void rayman2_scale_draw_distance(uint8_t* rdram, recomp_context* ctx)
     const int64_t caller_sp = ctx->r29;
 
     const float aspect_multiplier = aspect_scale();
+    {
+        const float asked = bits_to_float(static_cast<int32_t>(ctx->r7));
+        if (asked > 0.1f && asked < 10.0f) {
+            g_observed_aspect.store(asked, std::memory_order_relaxed);
+        }
+    }
     if (aspect_multiplier != 1.0f) {
         float aspect = bits_to_float(static_cast<int32_t>(ctx->r7));
         if (aspect > 0.1f && aspect < 10.0f) {
@@ -181,3 +192,114 @@ extern "C" void rayman2_scale_draw_distance(uint8_t* rdram, recomp_context* ctx)
     std::memcpy(&bits, &far_plane, sizeof(bits));
     MEM_W(0x14, caller_sp) = static_cast<int32_t>(bits);
 }
+
+// ---------------------------------------------------------------------------
+// Widescreen: which layer does the widening
+// ---------------------------------------------------------------------------
+
+namespace rayman2 {
+
+// Translate the Aspect Ratio setting into "the game renders wide", instead of
+// "the renderer widens what the game drew".
+//
+// Those two produce the same framing and are not the same thing. RT64's Expand
+// widens the view on its own side of the display list, so the game goes on
+// culling against its 4:3 frustum and the strips widescreen adds are drawn from
+// geometry the game already threw away -- the seam in the opening cinematic,
+// docs/issues/001. Widening the game's own projection instead means its frustum
+// IS the widened one, and whatever it culls against follows.
+//
+// The two cannot both do it: each multiplies the horizontal field of view, and
+// together they overshoot by a third. So when the player asks for Expand the
+// port hands the game the display's aspect and tells RT64 not to expand, which
+// leaves the game drawing an anamorphic wide view into its 4:3 framebuffer --
+// exactly what a widescreen hack on real hardware does -- and sets the
+// presentation to stretch it back out.
+//
+// This runs every frame rather than once, because it has to. The frontend's
+// apply_graphics_config() rebuilds the graphics configuration from a
+// default-constructed GraphicsConfig and assigns only the fields its own tab
+// knows about, so pfm_option -- which the tab does not list -- is reset to its
+// default every time any setting is applied. Pushing this once would survive
+// until the player next touched the menu.
+//
+// The menu keeps showing what the player chose. It renders from the frontend's
+// own option store, and apply_graphics_config only ever pushes from there into
+// ultramodern; nothing reads back. So rewriting ultramodern's copy is invisible
+// to the tab, which is what makes repurposing the setting possible without
+// forking the frontend.
+void update_widescreen_policy(int window_width, int window_height) {
+    // OFF BY DEFAULT, and it has to be, because the last step does not work.
+    //
+    // The plan needs the presentation to stretch the game's 4:3 framebuffer
+    // across the window, which is what PresentFillMode::Stretch is for. That
+    // field is dead: the fork added pfm_option to GraphicsConfig, serialises it
+    // and documents it, but nothing reads it -- not recompui, which is what
+    // actually configures RT64, and not ultramodern. Setting it changes
+    // nothing, so turning this on today converts a correctly-filled widescreen
+    // frame into a pillarboxed one. That is a worse picture in exchange for
+    // better culling, which is not a trade worth making silently.
+    //
+    // RAYMAN2_WIDESCREEN=game turns it on for testing. It comes out from behind
+    // this gate when the presentation can be told to stretch -- see
+    // docs/issues/001.
+    static const bool enabled = []() {
+        const char* mode = std::getenv("RAYMAN2_WIDESCREEN");
+        return (mode != nullptr) && (std::strcmp(mode, "game") == 0);
+    }();
+    if (!enabled) {
+        g_aspect_multiplier.store(1.0f, std::memory_order_relaxed);
+        return;
+    }
+
+    if (window_width <= 0 || window_height <= 0) {
+        return;
+    }
+
+    namespace renderer = ultramodern::renderer;
+    renderer::GraphicsConfig config = renderer::get_graphics_config();
+
+    // Telling ours apart from the player's. Both read Original once applied,
+    // but the frontend resets pfm_option to its default whenever it applies
+    // anything, so Original alongside Stretch can only be this function's work.
+    const bool ours = (config.ar_option == renderer::AspectRatio::Original)
+                   && (config.pfm_option == renderer::PresentFillMode::Stretch);
+
+    static bool widescreen = false;
+    if (config.ar_option == renderer::AspectRatio::Expand) {
+        widescreen = true;
+    }
+    else if (!ours) {
+        widescreen = false;
+    }
+
+    if (!widescreen) {
+        g_aspect_multiplier.store(1.0f, std::memory_order_relaxed);
+        return;
+    }
+
+    const float display_aspect = static_cast<float>(window_width) / static_cast<float>(window_height);
+    const float game_aspect = g_observed_aspect.load(std::memory_order_relaxed);
+    float multiplier = display_aspect / game_aspect;
+
+    // Never NARROW the game's view: a window taller than 4:3 would otherwise
+    // cut geometry the player could see before, which is the very defect this
+    // is here to remove. And cap the widening, because a projection stretched
+    // far enough stops looking like the game.
+    if (!(multiplier > 1.0f)) {
+        multiplier = 1.0f;
+    }
+    if (multiplier > 2.5f) {
+        multiplier = 2.5f;
+    }
+    g_aspect_multiplier.store(multiplier, std::memory_order_relaxed);
+
+    if (config.ar_option != renderer::AspectRatio::Original ||
+        config.pfm_option != renderer::PresentFillMode::Stretch) {
+        config.ar_option = renderer::AspectRatio::Original;
+        config.pfm_option = renderer::PresentFillMode::Stretch;
+        renderer::set_graphics_config(config);
+    }
+}
+
+} // namespace rayman2

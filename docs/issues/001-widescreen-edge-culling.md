@@ -1,8 +1,8 @@
 # 001 — Geometry culled at the edges in widescreen
 
-**Status:** open. Reproduced, the lever found and proven, and one blocker
-identified. The remaining step is a decision about what the Aspect Ratio menu
-should mean, not more investigation.
+**Status:** open, and blocked on something else. The fix is written and behind
+a gate; it cannot be turned on until the presentation can be told to stretch,
+because `pfm_option` turns out to be dead code.
 
 ---
 
@@ -184,3 +184,59 @@ would have to drive the game's aspect instead of the renderer's.
 
 That is a small amount of code in the port and no change to the submodule. It
 wants agreeing before it is written, because it moves a user-facing setting.
+
+## The fix, written and gated
+
+`rayman2::update_widescreen_policy()` in `src/draw_distance.cpp` implements the
+repurposing: when the player asks for Expand it hands the game the display's
+aspect through the `guPerspective` hook and tells RT64 not to expand, so the
+widening moves from the renderer to the game and the game's culling follows it.
+
+Two details make it work without forking the frontend:
+
+  * It runs every frame rather than once, because `apply_graphics_config()`
+    rebuilds the configuration from a default-constructed `GraphicsConfig` each
+    time any setting is applied, and would undo a single push.
+  * The menu goes on showing what the player chose. The tab renders from the
+    frontend's own option store and `apply_graphics_config` only ever pushes
+    from there into ultramodern; nothing reads back. Rewriting ultramodern's
+    copy is invisible to it.
+
+It is **off by default**, behind `RAYMAN2_WIDESCREEN=game`.
+
+## The blocker, properly identified
+
+The plan needs the presentation to stretch the game's 4:3 framebuffer across the
+window. `PresentFillMode::Stretch` is exactly that setting, and it does nothing
+at all, because **nothing reads `pfm_option`**.
+
+The field was added to `GraphicsConfig` in the N64ModernRuntime fork. It is
+serialised, it carries a default initialiser, and there is a long comment beside
+it explaining which fill mode should be the baseline and why. But the code that
+configures RT64 is `set_application_user_config()` in recompui, which is
+upstream and knows nothing about the field, and no other reader exists anywhere
+in ultramodern or the port. Setting it in `graphics.json`, or from the menu, or
+from this policy, has never had any effect.
+
+That is why enabling the policy today produces a *pillarboxed* frame: RT64 stops
+expanding, as intended, and then nothing tells the presentation to fill the
+window. Correct culling in a smaller picture is not a trade worth making
+silently, so it stays gated.
+
+This also affects the sibling Beetle Adventure Racing port, which added the
+field and describes its letterbox behaviour as a baseline to be moved off later.
+
+## What unblocks it
+
+One of:
+
+  * **Plumb `pfm_option` through to RT64.** RT64's own knob is
+    `EnhancementConfiguration::Presentation::removeBlackBorders`, which is
+    exposed in its developer UI as "Remove Black Borders". Wiring the existing
+    config field to it belongs in recompui and is a change worth sending
+    upstream rather than forking for.
+  * **Or drop the anamorphic route and keep RT64's Expand**, widening the
+    game's frustum for culling only -- which needs the projection matrix
+    written back to its un-widened form after `guPerspective` builds it. That
+    works only if the game culls from the camera rather than from the matrix it
+    just produced, which is not yet known and is one more experiment.

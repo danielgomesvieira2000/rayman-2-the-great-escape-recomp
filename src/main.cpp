@@ -94,6 +94,8 @@ void rayman2_stop_thread_sampler();
 
 // src/rt64_context.cpp -- set true once the renderer has presented a frame.
 namespace rayman2 { std::atomic<bool>& vi_has_ticked(); }
+// src/draw_distance.cpp
+namespace rayman2 { void update_widescreen_policy(int window_width, int window_height); }
 
 #ifdef RAYMAN2_ENABLE_FRONTEND
 // src/frontend.cpp -- the launcher, config menus and input binding.
@@ -242,6 +244,16 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 
 // Pumps the OS event queue. Runs on the thread that created the window.
 void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
+    // Keep the Aspect Ratio setting meaning "the game renders wide". Every
+    // frame, because the frontend resets part of the graphics configuration
+    // whenever any setting is applied. See src/draw_distance.cpp.
+    if (window != nullptr) {
+        int w = 0;
+        int h = 0;
+        SDL_GetWindowSize(window, &w, &h);
+        rayman2::update_widescreen_policy(w, h);
+    }
+
     // F9: capture everything worth having about the frame on screen. See
     // include/capture.h. This runs on the thread that pumps SDL events, which
     // is where the keyboard state is valid.
