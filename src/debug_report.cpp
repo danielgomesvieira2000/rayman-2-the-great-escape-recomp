@@ -567,7 +567,8 @@ bool directory_is_writable(const fs::path& dir) {
 
 namespace rayman2::report {
 
-void begin_session(const fs::path& preferred_dir, const fs::path& fallback_dir) {
+void begin_session(const fs::path& preferred_dir, const fs::path& fallback_dir,
+                   const std::string& version) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_file != nullptr) {
         return;
@@ -603,7 +604,7 @@ void begin_session(const fs::path& preferred_dir, const fs::path& fallback_dir) 
         return;
     }
 
-    write_header("0.2.0-alpha");
+    write_header(version.c_str());
     prune(dir);
 
 #ifdef _WIN32

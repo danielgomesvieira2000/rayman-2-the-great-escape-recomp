@@ -35,9 +35,17 @@ namespace rayman2::report {
  * is used when that is not writable, which is the normal case for an install
  * under Program Files. Safe to call once, early; every other function here is a
  * no-op until it has been.
+ *
+ * `version` is what the report's BUILD block will say produced it. It is a
+ * parameter rather than a constant in here because there must be exactly one
+ * place the port's version is written down: this file used to carry its own
+ * copy, and a copy that is bumped a release late makes every report of that
+ * release name the wrong build -- which is the one fact in the file that
+ * everything else is read against.
  */
 void begin_session(const std::filesystem::path& preferred_dir,
-                   const std::filesystem::path& fallback_dir);
+                   const std::filesystem::path& fallback_dir,
+                   const std::string& version);
 
 /* Close the session, appending the summary block. `clean` distinguishes
  * reaching the end of main from being killed, which is the first thing anyone
