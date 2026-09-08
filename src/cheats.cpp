@@ -22,6 +22,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 #include <variant>
 
 #ifdef RAYMAN2_ENABLE_FRONTEND
@@ -69,7 +70,7 @@ namespace {
 // somebody who has just turned a cheat on and died. A cheat has to work when it
 // is switched on.
 constexpr uint32_t kHealthAddressUnknown = 0;
-constexpr uint32_t kHealthAddressDefault = 0x80231870u;
+constexpr uint32_t kHealthAddressDefault = 0;   // located at run time; see below
 
 // Health is a float, and "hold at the highest seen" needs a sane range or it
 // latches onto whatever garbage is at the address before a level has loaded and
@@ -206,9 +207,68 @@ void write_value(uint8_t* rdram, uint32_t address, int width, uint32_t value) {
     }
 }
 
+// RAYMAN2_FREEZE=0xADDR[,0xADDR...] -- hold these words at whatever they first
+// held. Four-byte writes, once a frame.
+//
+// A blunt instrument, and deliberately opt-in rather than part of any cheat.
+// Freezing an address only makes sense while you know what is there, and most
+// of this game's interesting values live on the heap: the same number means one
+// thing in one session and something else entirely in the next, so a frozen
+// address list is safe to type and unsafe to ship. The Infinite Health cheat
+// locates its address every session instead -- see src/health_locator.cpp.
+void poll_freeze(uint8_t* rdram) {
+    struct Frozen { uint32_t address; uint32_t value; bool captured; };
+    static std::vector<Frozen> frozen = []() {
+        std::vector<Frozen> out;
+        const char* env = std::getenv("RAYMAN2_FREEZE");
+        if (env == nullptr) {
+            return out;
+        }
+        const char* p = env;
+        while (*p != ' ' && out.size() < 16) {
+            char* end = nullptr;
+            const unsigned long value = std::strtoul(p, &end, 0);
+            if (end == p) {
+                break;
+            }
+            const uint32_t address = static_cast<uint32_t>(value);
+            if (address >= 0x80000000u && address < 0x80800000u) {
+                out.push_back(Frozen{ address, 0, false });
+            }
+            p = (*end == ',') ? end + 1 : end;
+        }
+        if (!out.empty()) {
+            std::fprintf(stderr, "[rayman2] RAYMAN2_FREEZE: holding %zu address(es)\n", out.size());
+        }
+        return out;
+    }();
+
+    for (Frozen& entry : frozen) {
+        if (!entry.captured) {
+            const uint32_t seen = read_value(rdram, entry.address, 4);
+            // Not before there is something there. Captured at startup this
+            // reads 0x00000000 or 0xCCCCCCCC -- uninitialised fill -- and
+            // freezing health at zero would cause the death it was meant to
+            // prevent. Measured: exactly that happened the first time this ran.
+            if (seen == 0x00000000u || seen == 0xCCCCCCCCu) {
+                continue;
+            }
+            entry.value = seen;
+            entry.captured = true;
+            float as_float = 0.0f;
+            std::memcpy(&as_float, &entry.value, sizeof(as_float));
+            std::fprintf(stderr, "[rayman2] freeze: [0x%08X] held at 0x%08X (%.3f)\n",
+                         entry.address, entry.value, static_cast<double>(as_float));
+            continue;
+        }
+        write_value(rdram, entry.address, 4, entry.value);
+    }
+}
+
 } // namespace
 
 namespace rayman2 { void memory_search_set_enabled(bool on); }
+namespace rayman2 { uint32_t health_address_now(); void health_locator_poll(const uint8_t* rdram); }
 
 namespace rayman2::cheats {
 
@@ -292,7 +352,16 @@ void apply(uint8_t* rdram) {
     if (rdram == nullptr) {
         return;
     }
-    const uint32_t address = g_health_address.load(std::memory_order_relaxed);
+    // Locate health for THIS session before anything else. Its address is a
+    // field in a heap object and moves between runs and levels, so there is no
+    // constant to use -- see src/health_locator.cpp for what is used instead.
+    rayman2::health_locator_poll(rdram);
+    poll_freeze(rdram);
+
+    uint32_t address = g_health_address.load(std::memory_order_relaxed);
+    if (address == kHealthAddressUnknown) {
+        address = rayman2::health_address_now();
+    }
     if (address == kHealthAddressUnknown) {
         return;
     }
@@ -332,8 +401,7 @@ void apply(uint8_t* rdram) {
         // there is no need to wait for the game to have been at full health
         // once before the cheat does anything.
         if (std::getenv("RAYMAN2_HEALTH_FLOAT") == nullptr &&
-            std::getenv("RAYMAN2_HEALTH_VALUE") == nullptr &&
-            address == kHealthAddressDefault) {
+            std::getenv("RAYMAN2_HEALTH_VALUE") == nullptr) {
             const float full = 15.0f;
             uint32_t bits = 0;
             std::memcpy(&bits, &full, sizeof(bits));

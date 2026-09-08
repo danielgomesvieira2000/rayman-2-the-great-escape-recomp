@@ -178,6 +178,8 @@ set(PORT_SOURCES
     # The Cheats tab, and the memory search that finds the addresses it needs.
     src/cheats.cpp
     src/memory_search.cpp
+    # Finds Rayman's health each session; its address is heap and moves.
+    src/health_locator.cpp
     src/register_sections.cpp
     src/spin_yield.cpp
     src/crash_report.cpp
