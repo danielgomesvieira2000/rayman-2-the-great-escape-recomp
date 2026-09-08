@@ -108,7 +108,37 @@ thing to try is `PresentationMode::PresentEarly`, which submits the presentation
 event as soon as the display list is finished and so guarantees the condition
 above rather than relying on the VI history.
 
-## Why it is off by default: torn frames
+## Retested after the frame cap: the tearing did not reproduce
+
+**The section below is kept as the record, but its verdict is stale.** It was
+reached when the game was running at 60 display lists a second -- that is, at
+double speed, submitting flat out with no gap between handing a frame over and
+being told it was finished. docs/issues/004 fixed that, and the game is now
+blocked waiting on `dp_complete` for most of every 33 ms, so it is *not* drawing
+into the buffer while RT64 presents it. The condition that produced the tearing
+is gone.
+
+Retested with `RAYMAN2_PRESENT=skipbuffering` and `RefreshRate::Display`, using
+`RAYMAN2_AUTOCAPTURE=6` over 75-second runs: twelve captures, spanning the
+title screen, the intro cinematic and gameplay. **No tearing in any of them.**
+The strongest frame is a busy interior with particle effects and the lum counter
+reading "6/94" -- complete geometry, and the HUD digits, which the verdict below
+specifically named as sliced, entirely intact.
+
+Two honest caveats. Twelve samples is twelve samples, though the defect was
+described below as "neither subtle nor rare", which is exactly what twelve
+random samples should catch. And the capture goes through the compositor
+(`PW_RENDERFULLCONTENT`), which holds the last fully presented frame -- so a
+content-level defect of the kind described shows, while a scanline-level tear
+might not.
+
+What has *not* changed is the reason to want it: interpolation still only gets
+the presented rate to a median of about 38-40 with peaks near 60, not a clean
+doubling, in both `Console` and `SkipBuffering`. So the blocker below is
+probably stale, and the payoff is still smaller than it should be. Both are
+worth another look together.
+
+## The original verdict: torn frames
 
 Presenting the buffer the game has just drawn also means presenting it while the
 game may still be drawing into it, and on Rayman 2 that is visible. Captured
