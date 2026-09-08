@@ -11,7 +11,9 @@
 // while recompui's factory takes a presentation mode as well. This adapter
 // supplies it.
 
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 
 #ifdef _WIN32
@@ -20,6 +22,7 @@
 
 #include "rhi/rt64_render_hooks.h"
 #include "ultramodern/renderer_context.hpp"
+#include "ultramodern/ultramodern.hpp"
 #include "recompui/renderer.h"
 
 namespace {
@@ -61,7 +64,42 @@ namespace {
 
 RT64::RenderHookDraw* recompui_draw_hook = nullptr;
 
+// Count presented frames.
+//
+// RT64 calls the draw hook once per frame it actually presents, so this counts
+// what the player sees rather than what the game drew -- which is the whole
+// point when the renderer is generating frames between the game's own. Compare
+// it against RAYMAN2_AUDIOPROBE, which reports the rate the GAME is producing
+// audio at: if this number rises while that one does not, the extra frames are
+// coming from interpolation and the simulation is running at its original
+// speed. If both rise, something has sped the game up and the physics with it.
+void count_presented_frame() {
+    static const bool enabled = std::getenv("RAYMAN2_FPSPROBE") != nullptr;
+    if (!enabled) {
+        return;
+    }
+    using clock = std::chrono::steady_clock;
+    static clock::time_point window_start = clock::now();
+    static int frames = 0;
+
+    frames++;
+    const clock::time_point now = clock::now();
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - window_start).count();
+    if (elapsed >= 1000) {
+        // The display rate is the one RT64 measured from the swap chain, and it
+        // is what RefreshRate::Display makes the interpolation target. If it
+        // does not match the monitor, no amount of interpolation will either.
+        std::fprintf(stderr, "[rayman2] presented %.1f frames/s   (display reports %u Hz)\n",
+                     frames * 1000.0 / static_cast<double>(elapsed),
+                     ultramodern::get_display_refresh_rate());
+        frames = 0;
+        window_start = now;
+    }
+}
+
 void draw_hook_with_com(RenderCommandList* list, RenderFramebuffer* swap_chain_framebuffer) {
+    count_presented_frame();
+
 #ifdef _WIN32
     // Apartment-threaded, matching what NFD_Init would request. There is no
     // matching CoUninitialize: this thread lives as long as the renderer.
@@ -103,7 +141,7 @@ create_render_context(uint8_t* rdram,
     auto context = recompui::renderer::create_render_context(
         rdram,
         window_handle,
-        ultramodern::renderer::PresentationMode::Console,
+        ultramodern::renderer::PresentationMode::SkipBuffering,
         developer_mode);
 
     // Chain the draw hook, once. The guard matters if the renderer is ever

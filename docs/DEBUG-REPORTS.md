@@ -93,6 +93,8 @@ block. Neither can fire by accident.
     RAYMAN2_SELFTEST=crash|terminate   prove the crash reporting works (above)
     RAYMAN2_NO_MIRROR=1                do not mirror output into the report;
                                        errors and crashes are still recorded
+    RAYMAN2_FPSPROBE=1                 report presented frames per second and
+                                       the rate RT64 measured from the display
     RAYMAN2_PAKTRACE=1                 trace every Controller Pak transaction
     RAYMAN2_AUDIOPROBE=1               report the audio rate, peak and queue
                                        depth once a second

@@ -118,7 +118,12 @@ void set_default_bindings() {
     kb(GameInput::APPLY_MENU,     { InputField::keyboard(SDL_SCANCODE_F) });
     kb(GameInput::TAB_LEFT_MENU,  { InputField::keyboard(SDL_SCANCODE_Q) });
     kb(GameInput::TAB_RIGHT_MENU, { InputField::keyboard(SDL_SCANCODE_E) });
-    pad(GameInput::TOGGLE_MENU,    { InputField::controller_digital(SDL_CONTROLLER_BUTTON_START) });
+    // Back -- the View/Select button on an Xbox pad -- opens the frontend menu,
+    // NOT Start. Start belongs to the game: Rayman 2 pauses with it, and a pad
+    // that cannot reach the game's own pause menu is a pad that cannot play the
+    // game. Binding both to Start, as this originally did, meant the frontend
+    // swallowed every press.
+    pad(GameInput::TOGGLE_MENU,    { InputField::controller_digital(SDL_CONTROLLER_BUTTON_BACK) });
     pad(GameInput::ACCEPT_MENU,    { InputField::controller_digital(SDL_CONTROLLER_BUTTON_A) });
     pad(GameInput::BACK_MENU,      { InputField::controller_digital(SDL_CONTROLLER_BUTTON_B) });
     pad(GameInput::APPLY_MENU,     { InputField::controller_digital(SDL_CONTROLLER_BUTTON_Y) });

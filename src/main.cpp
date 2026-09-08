@@ -652,6 +652,23 @@ int main(int argc, char** argv) {
     timeBeginPeriod(1);   // 1 ms scheduler granularity; the runtime sleeps in small slices
 #endif
 
+    // Controllers.
+    //
+    // Nothing else initialises this. SDL only enumerates game controllers, and
+    // only emits SDL_CONTROLLERDEVICEADDED, once its game-controller subsystem
+    // is up -- and the port was initialising only video and audio. recompinput
+    // handles the ADDED event correctly and opens the device, so a wired pad
+    // was not "unsupported" so much as never announced: no event, no open, no
+    // input, and no error either.
+    //
+    // It has to happen before the frontend is initialised, because SDL queues
+    // an ADDED event for every device already attached at the moment the
+    // subsystem starts, and those are what populate the controller profiles.
+    if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0) {
+        rayman2::report::error("input", "SDL game controller init failed: %s", SDL_GetError());
+        std::fprintf(stderr, "[rayman2] no game controller support: %s\n", SDL_GetError());
+    }
+
     for (const auto& game : supported_games) {
         recomp::register_game(game);
     }
