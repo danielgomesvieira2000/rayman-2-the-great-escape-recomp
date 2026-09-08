@@ -60,12 +60,23 @@ display has to actually be running at the rate being asked for.
 ## Measured
 
 `RAYMAN2_FPSPROBE=1` reports presented frames per second once a second, together
-with the rate RT64 measured from the swap chain. Read it against
-`RAYMAN2_AUDIOPROBE=1`, which reports the rate the *game* is producing audio at:
+with the rate RT64 measured from the swap chain.
 
-  * if the presented rate rises while the audio rate does not, the extra frames
-    are interpolated and the simulation is running at its original speed;
-  * if both rise, something has sped the game up, and the physics with it.
+**Correction.** This section used to say that `RAYMAN2_AUDIOPROBE=1` reports the
+rate the *game* is producing audio at, and that comparing the two distinguishes
+interpolated frames from a sped-up simulation. It does not, and the claim was
+asserted rather than checked. The AI message is enqueued once per VI retrace at
+`ultramodern/src/events.cpp:263`, unconditionally and with no reference to the
+game's update loop, so audio synthesis is paced by the 60 Hz tick and the
+22050 Hz sample rate. A game loop running at twice its intended rate produces
+the same number of samples per second, and the probe reads identically either
+way -- measured over three minutes in docs/issues/004, where the simulation
+*is* running at double speed and the audio rate does not move.
+
+So the audio probe answers "is the audio path keeping up", which is what it was
+built for. It does not answer "is the simulation running at the right speed",
+and there is currently no probe that does; the honest test is to time a known
+sequence -- an attract-mode demo -- against a console or an accurate emulator.
 
 On the development machine, whose panel is 60 Hz:
 
@@ -74,16 +85,23 @@ On the development machine, whose panel is 60 Hz:
 
 The dips to 47 under `Console` were the double-buffered presentation, not the
 game: with interpolation explicitly disabled (`RefreshRate::Original`)
-`SkipBuffering` still holds 57-60. So on a 60 Hz display, where the game already
-produces about 60 frames a second, what this change buys is a steady presented
-rate rather than a higher one. The audio rate is identical in every case, which
-is the measurement that matters: the game is running at the same speed it always
-did.
+`SkipBuffering` still holds 57-60. So on a 60 Hz display, where the port is
+already producing about 60 frames a second, what this change buys is a steady
+presented rate rather than a higher one.
 
-The interpolation proper cannot be demonstrated on a 60 Hz panel by a game that
-already reaches 60. To see it, run on a display above 60 Hz with the refresh
-rate option set to `Display`, and check that `RAYMAN2_FPSPROBE` reports the
-panel's rate while `RAYMAN2_AUDIOPROBE` still reports about 22400.
+That the port produces 60 was read here as the game reaching its own rate. It is
+not: docs/issues/004 establishes that the game's loop is paced by RDP
+completion, which this runtime signals instantly, so 60 is the *defect* rather
+than the game's rate. That does not change anything above about interpolation --
+none of it reaches the game either way -- but it does mean the measurements in
+this section were taken against a simulation running at roughly twice its
+intended speed, and should be retaken once 004 is fixed.
+
+The interpolation proper cannot be demonstrated on a 60 Hz panel while the port
+is already presenting 60. To see it, run on a display above 60 Hz with the
+refresh rate option set to `Display`, and check that `RAYMAN2_FPSPROBE` reports
+the panel's rate. There is no second probe to check the simulation against; see
+the correction above.
 
 If the presented rate stays at the game's own rate on such a display, the next
 thing to try is `PresentationMode::PresentEarly`, which submits the presentation
