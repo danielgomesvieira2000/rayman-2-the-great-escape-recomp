@@ -332,3 +332,48 @@ currently cannot be.
 
 So it wants a decision before it is written: fork the submodule and carry a
 patch, or send it upstream and wait.
+
+## The recompui patch has nothing to attach to
+
+Before forking RecompFrontend to plumb `pfm_option` through, the destination was
+checked. There is no destination.
+
+`RT64::UserConfiguration` has no fill, stretch or letterbox option of any kind.
+Its whole aspect model is `AspectRatio` -- Original, Expand or Manual, plus
+`aspectTarget` -- and every one of those works by scaling the *projection*:
+
+    aspectRatioSource = the game's framebuffer aspect, from the VI
+    aspectRatioTarget = what is wanted on screen
+    aspectRatioScale  = target / source, applied to the projection
+
+RT64 widens the field of view and renders a correspondingly wider target, which
+then fills the window. It never stretches a 4:3 image. So `PresentFillMode`
+describes a capability RT64 does not expose, and passing `pfm_option` through
+recompui would be passing it to nothing. The field is not merely unplumbed; it
+was speculative.
+
+That kills the anamorphic plan outright rather than blocking it, and it is worth
+having found before opening a pull request that could not have worked.
+
+## The route that does follow from the evidence
+
+Everything measured so far says:
+
+  * the game culls from the projection matrix;
+  * RT64 needs that same matrix to stay narrow, because its Expand multiplies it
+    to produce the displayed field of view.
+
+Both can be true at once, because they read the matrix at *different times*. The
+game culls while it builds its frame; RT64 reads the matrix later, when it
+processes the display list. So leave the wide matrix in place for the game --
+drop the restore at `guPerspective`'s return -- and narrow it instead at the
+moment the display list is handed over.
+
+That seam is reachable without touching any submodule. The port supplies
+`create_render_context`, and can return a wrapper around recompui's context that
+narrows the pending matrices in `send_dl` before delegating. The game gets a
+widened frustum for the whole of its own frame; RT64 gets exactly the matrix it
+gets today.
+
+The risk to check is whether the game reads its projection matrix again after
+submitting the frame, which would see the narrowed value.
