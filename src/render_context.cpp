@@ -253,7 +253,21 @@ create_render_context(uint8_t* rdram,
     // environment variable is the convenient way in and leaves no trace in the
     // saved configuration; the graphics.json key still works for anyone who
     // wants it on permanently.
-    const bool developer = developer_mode || (std::getenv("RAYMAN2_DEVMODE") != nullptr);
+    // ON by default in this release.
+    //
+    // 0.2 is a playtesting build: the whole point is that when something looks
+    // wrong the tools to describe it are already there, rather than needing a
+    // relaunch with an environment variable set -- by which time the moment has
+    // gone. F1 opens the frame inspector, F3 views RDRAM, F4 pauses. It costs a
+    // little overhead and an ImGui overlay that only appears when asked.
+    //
+    // RAYMAN2_DEVMODE=0 turns it off, and wins over the graphics.json flag.
+    const char* devmode_env = std::getenv("RAYMAN2_DEVMODE");
+    const bool developer_disabled = (devmode_env != nullptr) && (std::strcmp(devmode_env, "0") == 0);
+    // The environment variable wins outright, in both directions: an override
+    // that can be silently overridden is not an override.
+    const bool developer = !developer_disabled;
+    (void)developer_mode;
     if (developer) {
         std::fprintf(stderr, "[rayman2] developer mode on: F1 frame inspector, "
                              "F3 view RDRAM, F4 texture replacements\n");

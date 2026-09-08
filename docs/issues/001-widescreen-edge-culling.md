@@ -1,8 +1,9 @@
 # 001 — Geometry culled at the edges in widescreen
 
-**Status:** fixed. The culling is derived from the camera's field of view, and
-widening that -- while putting the projection back before the display list is
-handed over -- makes the game cull for the frame it is actually drawing.
+**Status:** PARKED, unfixed. Five attempts. The last one is the only one that
+demonstrably moved the culling boundary at all, and it still does not remove the
+defect in play. Everything learned is below; the code is off by default and
+reachable behind environment variables.
 
 ---
 
@@ -716,3 +717,83 @@ Gameplay. The intro is one scene and a scripted camera; scenery winking out at
 the sides during play is what this was reported as, and that is where it gets
 confirmed. Worth watching for too: geometry the level design assumed invisible
 now being drawn at the edges, which over-culling can expose.
+
+---
+
+# Parked
+
+Reported again after the field-of-view fix: scenery still culls when it should
+not. So widening the camera's angle moves the boundary -- that much is visible
+in the intro, where geometry appeared at both edges that had not been there --
+but it does not remove the defect during play. Either the widening is not enough
+in the situations that matter, or more than one mechanism is at work and the
+camera frustum is only one of them.
+
+Turned off by default. `RAYMAN2_FOV=<1.0-2.0>` re-enables it with a fixed
+multiplier; the automatic path derived from the Aspect Ratio setting is off with
+it.
+
+## What is known, and how it was established
+
+**The game culls; nothing downstream does.** RT64's `cullDl` is an empty
+function with a `// TODO`, so the renderer draws whatever it is handed. And the
+free camera does not move the boundary: it replaces the view matrix and
+re-renders the display list the game already built, so anything downstream
+removing geometry would be re-evaluated from the new viewpoint and the boundary
+would drift. It does not. The geometry is absent from the display list.
+
+**The visibility test is derived from the camera's field of view**, at
+`[camera + 0x68]` in radians, and from nothing further downstream. Widening it
+from 69.6 to 97.5 degrees put geometry at both edges of a frame that previously
+had a hard seam. Nothing else tried in five attempts moved the boundary.
+
+**It is not derived from the aspect, nor from the projection matrix.** Four
+attempts wrote to those and none moved anything. The game's own screen-shake
+routines settle it independently: `func_800996EC` and `func_800997A8` add a
+scaled sine to both the fovy and the aspect every frame while shaking, and
+screen shake does not make scenery wink in and out.
+
+**The camera setup**, `func_8009989C`, calling `guPerspective` at 0x80099EDC:
+
+    fovy   = [camera + 0x68] * 57.29578        # radians to degrees
+    aspect = (float)[sp + 0x6C] / (float)[sp + 0x68]     # 300/224 = 1.3393
+    near   = [D_800C8D90] * [D_800C8D50]
+    far    = [D_800C8D90] * [D_800C8D54]       # 8192 against a near of 32
+
+The two integers behind the aspect are the screen dimensions, held as locals
+that this function never writes -- filled by a callee through a pointer that
+static reading has not located. They are worth finding: they are the game's own
+notion of how wide the screen is, and anything else derived from that notion is
+a candidate for the part of the culling the field of view does not cover.
+
+## Anti-patterns this issue paid for
+
+**Do not multiply a value the game reads back.** The aspect attempt widened
+whatever arrived; the game retains what it is handed; the value climbed every
+frame -- 1.3393, 1.9369, 2.5500 -- until it hit the clamp. Write an absolute
+target derived from a base captured once, or do not write at all.
+
+**Do not infer a mechanism from a screenshot.** Four times an experiment failed
+and the inference drawn from the failure was itself wrong: a cinematic camera
+that did not exist, then that the game culls from the matrix, then that it does
+not. Changing one number and reading a picture is too weak an instrument. The
+free camera answered in one observation what four experiments could not, because
+it distinguishes "hidden from here" from "not submitted".
+
+**Symbolise against the build that crashed.** The report's build stamp came from
+`__DATE__`, which freezes when its own file stops changing, so a crash was
+symbolised against a newer binary and produced confident, wrong function names.
+Fixed, but the lesson generalises.
+
+## Where to look next
+
+1. **Find the two screen-dimension integers.** Trace them dynamically -- hook
+   `func_8009989C` and watch RDRAM -- rather than statically. If the culling
+   has a screen-space component, that is where it comes from.
+2. **Find the visibility test directly**, by tracing what reads the camera
+   object around the point where geometry is accepted or rejected. A proper
+   reverse-engineering job, and the honest next step if 1 does not pay.
+3. **Check whether it is sector visibility rather than a frustum at all.**
+   Rayman 2 is a sector engine; if what is drawn is decided by sector
+   reachability, a frustum will never be the whole answer, and the same question
+   is open for draw distance in [002](002-draw-distance.md).

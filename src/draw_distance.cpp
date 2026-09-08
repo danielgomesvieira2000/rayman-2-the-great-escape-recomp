@@ -502,6 +502,13 @@ extern "C" void rayman2_widen_camera_fov(uint8_t* rdram, recomp_context* ctx) {
         widened = fov * forced;
     }
     else {
+        // PARKED. Widening the camera's angle does move the culling boundary --
+        // it is the only thing that ever did -- but it does not remove the
+        // defect in play, so the automatic path is off. Over-culling with no
+        // payoff is a cost, not a feature. RAYMAN2_FOV re-enables it with a
+        // fixed multiplier for further work. See docs/issues/001.
+        return;
+
         const float display = g_display_aspect.load(std::memory_order_relaxed);
         const float base = g_base_aspect.load(std::memory_order_relaxed);
         if (!(display > 0.0f) || !(base > 0.0f) || display <= base) {
