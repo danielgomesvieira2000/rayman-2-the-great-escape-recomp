@@ -55,32 +55,90 @@ namespace {
 
 using clock_type = std::chrono::high_resolution_clock;
 
-// The rate the game's loop is allowed to advance at, in display lists a second.
+// How many VI fields each game frame is allowed to occupy.
 //
-// Thirty, because the defect is that the game runs at exactly twice its
-// intended speed against a 60 Hz field rate. That factor is what was reported
-// from play and what the display-list rate measures: a pegged 60 a second in
-// any scene with something happening in it.
+// Two, because the defect is that the game runs at exactly twice its intended
+// speed against a 60 Hz field rate, so one frame every two fields is 30 a
+// second.
 //
-// RAYMAN2_FRAMECAP=<n> overrides it and RAYMAN2_FRAMECAP=0 turns it off, which
-// is how the two can be compared without a rebuild -- and how the measurement
-// in docs/issues/004 can be repeated.
-int target_rate() {
-    static const int rate = []() {
-        int value = 30;
+// Expressed in FIELDS rather than in a frame rate, because fields are the only
+// thing the game's frame can actually be aligned to and a rate that is not a
+// divisor of 60 cannot be delivered evenly. RAYMAN2_FRAMECAP is still given in
+// frames per second, because that is what a person means, and is converted here
+// -- with the achieved rate reported, so asking for 45 and being given 30 is
+// visible rather than mysterious.
+int fields_per_frame() {
+    static const int fields = []() {
+        int value = 2;
         if (const char* env = std::getenv("RAYMAN2_FRAMECAP")) {
-            const long parsed = std::strtol(env, nullptr, 10);
-            // A cap above the field rate cannot bind, and a negative one is not
-            // a rate. Both are clamped rather than refused, so a typo degrades
-            // to "off" instead of to something unexplainable.
-            value = static_cast<int>(parsed < 0 ? 0 : (parsed > 240 ? 240 : parsed));
-            std::fprintf(stderr, "[rayman2] RAYMAN2_FRAMECAP: %s\n",
-                         value == 0 ? "no frame cap; the game will run at double speed"
-                                    : "frame cap overridden");
+            const long asked = std::strtol(env, nullptr, 10);
+            if (asked <= 0) {
+                std::fprintf(stderr, "[rayman2] RAYMAN2_FRAMECAP=0: no frame cap;"
+                                     " the game will run at double speed\n");
+                return 0;
+            }
+            value = static_cast<int>((60 + asked / 2) / asked);
+            if (value < 1) {
+                value = 1;
+            }
+            if (value > 60) {
+                value = 60;
+            }
+            std::fprintf(stderr, "[rayman2] RAYMAN2_FRAMECAP=%ld: one frame every %d VI fields,"
+                                 " so %d frames a second\n",
+                         asked, value, 60 / value);
         }
         return value;
     }();
-    return rate;
+    return fields;
+}
+
+// RAYMAN2_PACEPROBE=1 -- what interval each frame was actually delivered at.
+//
+// A rate averaged over a second cannot see judder: thirty frames delivered as
+// 2,2,2,2... and thirty delivered as 1,3,1,3... are both "30 a second", and only
+// one of them looks right. What the eye is complaining about is the spread, so
+// that is what this reports -- the measured gap between consecutive frames, in
+// VI fields, bucketed.
+//
+// A cap that is working reads as one bucket. Anything else is the picture
+// stuttering, however good the average looks.
+void probe(clock_type::duration delivered, clock_type::duration field) {
+    static const bool on = std::getenv("RAYMAN2_PACEPROBE") != nullptr;
+    if (!on || field.count() <= 0) {
+        return;
+    }
+
+    const double in_fields = static_cast<double>(delivered.count()) / static_cast<double>(field.count());
+    const int bucket = static_cast<int>(in_fields + 0.5);
+
+    static int counts[8] = {};
+    static double worst_low = 1e9;
+    static double worst_high = 0.0;
+    static clock_type::time_point last_report = clock_type::now();
+
+    counts[(bucket < 0) ? 0 : (bucket > 7 ? 7 : bucket)]++;
+    if (in_fields < worst_low) worst_low = in_fields;
+    if (in_fields > worst_high) worst_high = in_fields;
+
+    const clock_type::time_point now = clock_type::now();
+    if (now - last_report < std::chrono::seconds(5)) {
+        return;
+    }
+    last_report = now;
+
+    char line[256];
+    int used = 0;
+    for (int i = 0; i < 8; i++) {
+        if (counts[i] != 0) {
+            used += std::snprintf(line + used, sizeof(line) - used, " %df:%d", i, counts[i]);
+        }
+        counts[i] = 0;
+    }
+    std::fprintf(stderr, "[rayman2] pace:%s   spread %.2f-%.2f fields\n",
+                 used > 0 ? line : " (no frames)", worst_low, worst_high);
+    worst_low = 1e9;
+    worst_high = 0.0;
 }
 
 } // namespace
@@ -94,34 +152,59 @@ namespace rayman2 {
 // different thread (events.cpp enqueues an SpTaskAction only for M_GFXTASK), and
 // the game itself is blocked waiting for exactly the completion being delayed.
 void pace_frame() {
-    const int rate = target_rate();
-    if (rate <= 0) {
+    const int fields = fields_per_frame();
+    if (fields <= 0) {
         return;
     }
 
-    const auto period = std::chrono::nanoseconds(std::chrono::seconds(1)) / rate;
+    // The VI thread's own grid, not a timer of our own.
+    //
+    // THIS IS THE WHOLE OF IT. The first version of this slept until
+    // `previous + 1/30s`, which is a schedule with no relationship to the one
+    // the video interrupt is running, and the result was judder: 1000/30 ms is
+    // not exactly two fields, so the phase crept across a field boundary over
+    // tens of seconds and frames were shown for one field or three instead of
+    // two; and every time the game missed its deadline the phase was reset to
+    // wherever that happened to land. The picture stuttered back and forth even
+    // though the average rate was right.
+    //
+    // events.cpp puts field k at `get_start() + k/(60 * speed)`, so that is the
+    // grid a frame has to land on. Snapping to it makes the interval exactly
+    // `fields` fields every time, and the phase constant for the whole run.
+    const uint32_t speed = ultramodern::get_speed_multiplier();
+    const auto origin = ultramodern::get_start();
+    const auto field = std::chrono::duration_cast<clock_type::duration>(
+        std::chrono::nanoseconds(std::chrono::seconds(1)) / (60 * (speed == 0 ? 1 : speed)));
+
     const clock_type::time_point now = clock_type::now();
+    const long long now_field = (now <= origin) ? 0 : (now - origin) / field;
 
-    static bool started = false;
-    static clock_type::time_point next{};
-    if (!started) {
-        started = true;
-        next = now + period;
-        return;
+    static long long last_field = -1;
+    long long target = (last_field < 0) ? now_field : last_field + fields;
+
+    // Later than its deadline: the game was slower than the cap this frame, or
+    // is drawing rarely because nothing is moving. Resync to the grid rather
+    // than carry the shortfall, which would be repaid as a burst of frames
+    // faster than the cap -- the defect being fixed, in miniature.
+    if (target < now_field) {
+        target = now_field;
     }
 
-    if (now < next) {
-        ultramodern::sleep_until(next);
-        next += period;
+    last_field = target;
+
+    const clock_type::time_point deadline = origin + field * target;
+    if (now < deadline) {
+        ultramodern::sleep_until(deadline);
     }
-    else {
-        // Later than its deadline: the game was slower than the cap this frame,
-        // or is drawing rarely because nothing is moving. Either way the cap has
-        // nothing to do, and carrying the shortfall forward would repay it as a
-        // burst of frames faster than the cap -- which is the defect being
-        // fixed, in miniature.
-        next = now + period;
+
+    // Measured after the sleep, so it is what the game was actually given
+    // rather than what it was meant to be given.
+    static clock_type::time_point previous{};
+    const clock_type::time_point delivered_at = clock_type::now();
+    if (previous.time_since_epoch().count() != 0) {
+        probe(delivered_at - previous, field);
     }
+    previous = delivered_at;
 }
 
 } // namespace rayman2

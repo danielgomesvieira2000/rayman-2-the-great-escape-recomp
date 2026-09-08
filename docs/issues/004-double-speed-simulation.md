@@ -109,6 +109,45 @@ the game itself is blocked waiting for precisely the completion being delayed.
 The completion is made **late, never lost**, which is the caution
 docs/PHASE04-FINDINGS.md paid for: a dropped one gives one display list, ever.
 
+### The cap has to land on the VI's grid, not on a timer of its own
+
+The first version of this slept until `previous + 1/30s`. The average rate was
+right and the picture juddered -- reported from play as "back and forth
+jittering", not merely as a lower frame rate.
+
+A schedule of its own is the mistake. The video interrupt puts field *k* at
+`get_start() + k/60` (`events.cpp`), and a frame completing on any other
+schedule sits at an arbitrary phase against those boundaries. Sleep granularity
+is about a millisecond, so a phase that happens to sit near a boundary sends
+consecutive frames to either side of it at random, and they are shown for one
+field or three instead of two. Whether a run looked smooth then depended on
+where the first frame happened to fall, and every resync after a missed deadline
+re-rolled it.
+
+`ultramodern::get_start()` and `get_speed_multiplier()` are public, so the port
+can compute the same grid and snap each completion onto it. The interval is then
+exactly two fields every time and the phase is constant for the whole run.
+
+The knob is expressed in **fields per frame** internally for the same reason: a
+rate that is not a divisor of 60 cannot be delivered evenly on this grid.
+`RAYMAN2_FRAMECAP` is still given in frames a second because that is what a
+person means, and the achieved rate is reported when it is set, so asking for 45
+and being given 30 is visible rather than mysterious.
+
+### Measuring judder, which a rate cannot show
+
+Thirty frames delivered 2,2,2,2... and thirty delivered 1,3,1,3... are both
+"30 a second" and only one of them looks right, so the per-second rate is blind
+to exactly the defect above. `RAYMAN2_PACEPROBE=1` reports the measured gap
+between consecutive frames in VI fields, bucketed, every five seconds. A cap
+that is working reads as a single bucket:
+
+    pace: 2f:150   spread 1.90-2.11 fields
+
+Over fifty seconds, 590 of 594 frames were delivered at exactly two fields. The
+four that were not are the first frame, the fifteen-second stall below, and the
+resync after it.
+
 ### It is a cap, not a model of the RDP
 
 This is the honest limitation. A real RDP took as long as the scene needed; no

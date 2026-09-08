@@ -262,6 +262,9 @@ half an hour.
                                        second (default 30; 0 disables it and
                                        the game runs at double speed --
                                        docs/issues/004)
+    RAYMAN2_PACEPROBE=1                report the gap between consecutive game
+                                       frames in VI fields -- one bucket means
+                                       the pacing is even, several means judder
     RAYMAN2_DDPROBE=1                  report the game's projection arguments
     RAYMAN2_DRAWDIST=<n>               scale the projection far plane; see
                                        docs/issues/002, it changes nothing
