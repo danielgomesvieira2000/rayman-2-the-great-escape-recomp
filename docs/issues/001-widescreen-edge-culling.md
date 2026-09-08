@@ -1,8 +1,8 @@
 # 001 — Geometry culled at the edges in widescreen
 
-**Status:** open, but no longer stuck. The free camera settled what four
-experiments could not, and the camera setup has been traced. The next step is
-identified and is a different one from anything tried so far.
+**Status:** fixed. The culling is derived from the camera's field of view, and
+widening that -- while putting the projection back before the display list is
+handed over -- makes the game cull for the frame it is actually drawing.
 
 ---
 
@@ -661,3 +661,58 @@ the expensive way.
 
 It leaves the recommendation unchanged: the camera object's field of view at
 `+0x68` is upstream of this point and is the next thing to try.
+
+## Fixed: cull wide, draw narrow
+
+The field-of-view experiment worked, and it is the only thing that has touched
+the culling.
+
+Widening `[camera + 0x68]` from 1.2155 to 1.7017 radians -- 69.6 to 97.5 degrees
+-- made geometry appear at both edges of the intro frame, well outside where the
+old boundary sat. So the visibility test **is** derived from the camera's field
+of view, which is why the aspect and the matrix could never reach it: both are
+computed downstream of this.
+
+That on its own is a trade rather than a fix, because a wider field of view is
+wider vertically too. The completion is to widen the angle only for the game and
+put the projection back for the renderer, using the machinery already built for
+the aspect attempt:
+
+  * `rayman2_widen_camera_fov` writes the wider angle into the camera object
+    before `func_8009989C` reads it, so everything the game derives from the
+    camera -- the culling included -- uses it;
+  * it publishes `tan(wide/2) / tan(base/2)`, which is exactly what
+    `guPerspective` divided out of both `[0][0]` and `[1][1]`;
+  * `narrow_pending_projections` multiplies both back in `send_dl`, so RT64
+    parses the matrix an unmodified game would have produced.
+
+The game culls against a frustum larger than the frame; the renderer draws the
+original framing. Over-culling costs a little extra geometry submitted and
+nothing else.
+
+How much wider is derived rather than chosen. RT64's Expand multiplies the
+horizontal extent by display/source, so the angle is widened until `tan(half)`
+grows by the same ratio: `2*atan(tan(fov/2) * display/base)`. On a 16:9 window
+that is 69.6 -> 85.4 degrees. It follows the Aspect Ratio setting, so Original
+changes nothing.
+
+Measured on the automatic path:
+
+    camera fov 1.2155 -> 1.4911 rad
+    narrow 0x800E5F38 [0][0] -> 1.07341 (k=1.3274)
+    narrow 0x800E7320 [0][0] -> 1.46170 (k=1.3274)
+
+1.07341 is cot(69.644/2)/1.3393 and 1.46170 is cot(54.118/2)/1.3393 -- the two
+cameras' original horizontal scales. The intro frame that carried the seam, on
+the same subtitle, no longer has it, and the framing matches the original.
+
+Feedback-safe by the rule this issue learned the hard way: the hook remembers
+exactly what it wrote, leaves a value unchanged since then alone, and treats
+anything else as a fresh base. Never `(base * k) * k`.
+
+## What still wants a person
+
+Gameplay. The intro is one scene and a scripted camera; scenery winking out at
+the sides during play is what this was reported as, and that is where it gets
+confirmed. Worth watching for too: geometry the level design assumed invisible
+now being drawn at the edges, which over-culling can expose.

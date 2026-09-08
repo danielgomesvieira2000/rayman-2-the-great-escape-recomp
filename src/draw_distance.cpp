@@ -36,6 +36,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <mutex>
 #include <vector>
@@ -144,6 +145,7 @@ struct Pending {
 std::mutex g_pending_mutex;
 std::vector<Pending> g_pending;
 
+std::atomic<float> g_fov_undo{1.0f};
 std::atomic<uint32_t> g_perspective_mtx{0};
 std::atomic<float> g_perspective_k{1.0f};
 std::atomic<float> g_display_aspect{0.0f};
@@ -189,6 +191,13 @@ extern "C" void rayman2_scale_draw_distance(uint8_t* rdram, recomp_context* ctx)
     const float scale = current_scale();
     const int64_t caller_sp = ctx->r29;
 
+    // Capture the matrix pointer on the way IN, whichever path will need it.
+    // $a0 is not still live at the return hook, which is why this is here and
+    // not there -- the field-of-view path has nothing else to record it.
+    if (g_fov_undo.load(std::memory_order_relaxed) != 1.0f) {
+        g_perspective_mtx.store(static_cast<uint32_t>(ctx->r4), std::memory_order_relaxed);
+    }
+
     const float asked_aspect = bits_to_float(static_cast<int32_t>(ctx->r7));
     if (asked_aspect > 0.1f && asked_aspect < 10.0f) {
         g_observed_aspect.store(asked_aspect, std::memory_order_relaxed);
@@ -201,7 +210,11 @@ extern "C" void rayman2_scale_draw_distance(uint8_t* rdram, recomp_context* ctx)
         const float base = g_base_aspect.load(std::memory_order_relaxed);
         const float target = aspect_target_for(asked_aspect);
 
-        if (base > 0.0f && target > base * 1.001f) {
+        // The aspect is NOT written any more: four attempts proved it never
+        // reaches the visibility test, and the game's own screen shake writes
+        // there every frame without affecting culling. Only the display aspect
+        // is wanted, as the input to the field-of-view widening below.
+        if (false) {
             uint32_t aspect_bits = 0;
             std::memcpy(&aspect_bits, &target, sizeof(aspect_bits));
             ctx->r7 = static_cast<int32_t>(aspect_bits);
@@ -268,29 +281,6 @@ namespace rayman2 {
 // to the tab, which is what makes repurposing the setting possible without
 // forking the frontend.
 void update_widescreen_policy(int window_width, int window_height) {
-    // OFF. The widening is stable now, and it still does not fix the culling.
-    //
-    // Four attempts, and the last one is the one that rules the whole approach
-    // out: the game's frustum was genuinely widened for the whole of its frame
-    // -- verified from both ends, the aspect held steady at the display's and
-    // the matrix was narrowed back to the un-widened value at the handover --
-    // and scenery still winks out at the sides. So Rayman 2's visibility test
-    // reads neither the aspect passed to guPerspective nor the matrix built
-    // from it, and nothing done at this function can reach it.
-    //
-    // Left in the tree because the measurements are worth more than the code:
-    // RAYMAN2_WIDESCREEN=frustum re-enables it, RAYMAN2_NARROW=0 leaves the
-    // wide matrix in place through to RT64, and RAYMAN2_DDPROBE=1 prints both
-    // ends. Whatever finds the real culling will want those.
-    static const bool enabled = []() {
-        const char* mode = std::getenv("RAYMAN2_WIDESCREEN");
-        return (mode != nullptr) && (std::strcmp(mode, "frustum") == 0);
-    }();
-    if (!enabled) {
-        g_display_aspect.store(0.0f, std::memory_order_relaxed);
-        return;
-    }
-
     if (window_width <= 0 || window_height <= 0) {
         return;
     }
@@ -342,8 +332,11 @@ void update_widescreen_policy(int window_width, int window_height) {
 // then, so the start hook records it.
 
 extern "C" void rayman2_record_projection_matrix(uint8_t* rdram, recomp_context* ctx) {
-    const float k = g_perspective_k.exchange(1.0f, std::memory_order_relaxed);
-    const uint32_t mtx = g_perspective_mtx.exchange(0, std::memory_order_relaxed);
+    const float aspect_k = g_perspective_k.exchange(1.0f, std::memory_order_relaxed);
+    uint32_t mtx = g_perspective_mtx.exchange(0, std::memory_order_relaxed);
+    const float fov_k = g_fov_undo.load(std::memory_order_relaxed);
+
+    const float k = (aspect_k != 1.0f) ? aspect_k : fov_k;
     if (k == 1.0f || mtx == 0) {
         return;
     }
@@ -410,28 +403,134 @@ void narrow_pending_projections(uint8_t* rdram) {
     for (const Pending& entry : g_pending) {
         const int64_t base = static_cast<int32_t>(entry.address);
 
-        const int32_t integer = static_cast<int16_t>(MEM_H(0, base));
-        const uint32_t fraction = static_cast<uint16_t>(MEM_H(32, base));
-        const int32_t raw = (integer << 16) | static_cast<int32_t>(fraction);
+        // [0][0] is the horizontal scale and [1][1] the vertical. An N64 Mtx is
+        // 4x4 of s15.16 stored split -- sixteen halfwords of integer parts then
+        // sixteen of fractional -- so element (r,c) is at (r*4+c)*2 and
+        // 32 + (r*4+c)*2. Widening the angle shrank both, so both come back.
+        const int element_offsets[2] = { 0, 10 };   // [0][0] and [1][1]
+        double first = 0.0;
+        for (int i = 0; i < 2; i++) {
+            const int off = element_offsets[i];
 
-        const double narrowed = (static_cast<double>(raw) / 65536.0) * static_cast<double>(entry.factor);
-        if (!(narrowed > -32768.0 && narrowed < 32768.0)) {
-            continue;
+            const int32_t integer = static_cast<int16_t>(MEM_H(off, base));
+            const uint32_t fraction = static_cast<uint16_t>(MEM_H(32 + off, base));
+            const int32_t raw = (integer << 16) | static_cast<int32_t>(fraction);
+
+            const double narrowed = (static_cast<double>(raw) / 65536.0) * static_cast<double>(entry.factor);
+            if (!(narrowed > -32768.0 && narrowed < 32768.0)) {
+                continue;
+            }
+            if (i == 0) {
+                first = narrowed;
+            }
+
+            const int32_t out = static_cast<int32_t>(narrowed * 65536.0);
+            MEM_H(off, base) = static_cast<int16_t>(out >> 16);
+            MEM_H(32 + off, base) = static_cast<int16_t>(out & 0xFFFF);
         }
-
-        const int32_t out = static_cast<int32_t>(narrowed * 65536.0);
-        MEM_H(0, base) = static_cast<int16_t>(out >> 16);
-        MEM_H(32, base) = static_cast<int16_t>(out & 0xFFFF);
+        const double narrowed = first;
+        const int32_t raw = 0;
+        (void)raw;
 
         static const bool on = std::getenv("RAYMAN2_DDPROBE") != nullptr;
         static int remaining = 6;
         if (on && remaining-- > 0) {
-            std::fprintf(stderr, "[rayman2] narrow 0x%08X [0][0] %.5f -> %.5f (k=%.4f)\n",
-                         entry.address, static_cast<double>(raw) / 65536.0, narrowed,
-                         static_cast<double>(entry.factor));
+            std::fprintf(stderr, "[rayman2] narrow 0x%08X [0][0] -> %.5f (k=%.4f)\n",
+                         entry.address, narrowed, static_cast<double>(entry.factor));
         }
     }
     g_pending.clear();
 }
 
 } // namespace rayman2
+
+// ---------------------------------------------------------------------------
+// The camera's own field of view
+// ---------------------------------------------------------------------------
+//
+// The experiment issue 001 arrived at. Everything tried before wrote to the
+// aspect or the projection matrix, which the game's own screen shake also does
+// every frame without ever affecting what is culled -- so the visibility test
+// is upstream of them. The field of view in the camera object at +0x68 is
+// upstream: func_8009989C stores it there, then reads it back to build fovy.
+// If the culling is derived from the camera at all, this is what it reads.
+//
+// Written into RDRAM rather than into a register, because the point is for
+// whatever reads the camera LATER to see the wider value; changing only the
+// register would reach the projection and nothing else, which is the mistake
+// already made four times.
+//
+// Writing to something the game reads back is what compounded last time, so
+// this remembers exactly what it wrote. A value unchanged since then is left
+// alone; anything else is a fresh value from the game and becomes the new base.
+// Either way the result is base * k and never (base * k) * k.
+extern "C" void rayman2_widen_camera_fov(uint8_t* rdram, recomp_context* ctx) {
+    static const float forced = []() {
+        if (const char* env = std::getenv("RAYMAN2_FOV")) {
+            const float parsed = static_cast<float>(std::atof(env));
+            return (parsed >= 1.0f && parsed <= 2.0f) ? parsed : 0.0f;
+        }
+        return 0.0f;
+    }();
+
+    const int64_t camera = ctx->r16;   // $s0, the camera object
+    const int32_t raw = MEM_W(0x68, camera);
+    float fov = 0.0f;
+    std::memcpy(&fov, &raw, sizeof(fov));
+
+    // A field of view is an angle in radians. Anything outside this is not one,
+    // and a projection built from a nonsense angle is worse than a narrow view.
+    if (!(fov > 0.05f && fov < 3.0f)) {
+        return;
+    }
+
+    static std::atomic<int32_t> last_written{0};
+    if (raw == last_written.load(std::memory_order_relaxed)) {
+        return;   // still ours from last frame; widening again would compound
+    }
+
+    // How much wider the frustum has to be to cover the frame RT64 is drawing.
+    //
+    // RT64's Expand multiplies the horizontal extent by display/source, so the
+    // culling has to cover at least that much. Widening the angle so that
+    // tan(half) grows by the same ratio does it. The vertical grows too, which
+    // costs a little extra geometry submitted and nothing else -- the renderer
+    // never sees this angle, because the matrix is put back before the display
+    // list is handed over. Culling wide and drawing narrow is the whole point.
+    float widened = fov;
+    if (forced > 0.0f) {
+        widened = fov * forced;
+    }
+    else {
+        const float display = g_display_aspect.load(std::memory_order_relaxed);
+        const float base = g_base_aspect.load(std::memory_order_relaxed);
+        if (!(display > 0.0f) || !(base > 0.0f) || display <= base) {
+            return;
+        }
+        widened = 2.0f * std::atan(std::tan(fov * 0.5f) * (display / base));
+        if (!(widened > fov) || widened >= 3.0f) {
+            return;
+        }
+    }
+    int32_t out = 0;
+    std::memcpy(&out, &widened, sizeof(out));
+    MEM_W(0x68, camera) = out;
+    last_written.store(out, std::memory_order_relaxed);
+
+    // What it will take to put the projection back afterwards.
+    //
+    // guPerspective builds [0][0] as cot(fovy/2)/aspect and [1][1] as
+    // cot(fovy/2). Widening the angle shrinks both by the same factor, so
+    // multiplying both by tan(wide/2)/tan(base/2) restores exactly the matrix
+    // the un-widened angle would have produced. The game then culls against the
+    // wide frustum while the renderer draws the original framing -- which is the
+    // whole point, and the reason this is not simply a wider field of view.
+    g_fov_undo.store(std::tan(widened * 0.5f) / std::tan(fov * 0.5f),
+                     std::memory_order_relaxed);
+
+    static const bool probe = std::getenv("RAYMAN2_DDPROBE") != nullptr;
+    static int remaining = 5;
+    if (probe && remaining-- > 0) {
+        std::fprintf(stderr, "[rayman2] camera fov %.4f -> %.4f rad\n", fov, widened);
+    }
+}

@@ -76,6 +76,10 @@ void rayman2_scale_draw_distance(uint8_t* rdram, recomp_context* ctx);
    list is handed to the renderer rather than immediately. */
 void rayman2_record_projection_matrix(uint8_t* rdram, recomp_context* ctx);
 
+/* Widens the field of view stored in the camera object, upstream of both the
+   projection and whatever the game culls with. See docs/issues/001. */
+void rayman2_widen_camera_fov(uint8_t* rdram, recomp_context* ctx);
+
 void rayman2_debug_node(uint8_t* rdram, uint32_t node_addr);
 void rayman2_debug_assert(uint8_t* rdram, uint32_t ra);
 void rayman2_debug_site(uint8_t* rdram, uint32_t site);

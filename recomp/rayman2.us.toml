@@ -246,3 +246,17 @@ text = "rayman2_scale_draw_distance(rdram, ctx);"
 func = "func_800038C0"
 before_vram = 0x80003A80
 text = "rayman2_record_projection_matrix(rdram, ctx);"
+
+# The camera's field of view, widened where the game keeps it.
+#
+# func_8009989C is the camera setup. It stores the field of view into the camera
+# object at +0x68 (0x80099D2C) and reads it back at 0x80099DF8 to build the fovy
+# it hands guPerspective. Hooking before that read means the wider value is in
+# the camera object itself, so anything that reads the camera afterwards -- the
+# visibility test included, if it is camera-derived -- sees it too.
+#
+# $s0 holds the camera object at this point, which is ctx->r16.
+[[patches.hook]]
+func = "func_8009989C"
+before_vram = 0x80099DF8
+text = "rayman2_widen_camera_fov(rdram, ctx);"
