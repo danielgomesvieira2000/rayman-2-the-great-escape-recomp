@@ -51,6 +51,7 @@
 #ifdef RAYMAN2_ENABLE_FRONTEND
 #include "recompui/recompui.h"
 #include "recompui/program_config.h"   // recompui::programconfig::set_program_*
+#include "recompui/config.h"           // recompui::config::sound::get_main_volume
 #endif
 
 // ---------------------------------------------------------------------------
@@ -260,6 +261,25 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 #endif
 }
 
+// The Sound tab's Main Volume, as a linear gain.
+//
+// The frontend has always had the slider and the port has never read it: the
+// tab is created in src/frontend.cpp, the value is written to sound.json, and
+// nothing between there and SDL_QueueAudio ever looked at it. Moving it did
+// nothing, which is what was reported.
+//
+// Published from the thread that pumps events and read on the thread that
+// queues audio, so it is an atomic rather than a call to
+// recompui::config::sound::get_main_volume() from the audio path -- the same
+// shape src/draw_distance.cpp uses for the graphics settings, and for the same
+// reason: the config store is the frontend's and is not documented as safe to
+// read from anywhere.
+//
+// Linear, because the control is a percentage and that is what a percentage of
+// volume most directly means. It is not a perceptual curve: 50 is half the
+// amplitude, which is about six decibels down rather than half as loud.
+std::atomic<float> g_audio_gain{1.0f};
+
 #ifdef RAYMAN2_ENABLE_FRONTEND
 // RAYMAN2_AUTOSTART=1 -- press Start on the launcher, so a run can be scripted.
 //
@@ -336,6 +356,18 @@ void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     }
 
 #ifdef RAYMAN2_ENABLE_FRONTEND
+    // Pick up the Sound tab's Main Volume. Every frame, for the same reason the
+    // widescreen policy above is pushed every frame: the frontend rebuilds its
+    // configuration whenever any setting is applied, and a value read once would
+    // be a value that stopped tracking the slider the first time the player
+    // touched anything.
+    {
+        const double percent = recompui::config::sound::get_main_volume();
+        const float gain = static_cast<float>(percent) / 100.0f;
+        g_audio_gain.store(gain < 0.0f ? 0.0f : (gain > 1.0f ? 1.0f : gain),
+                           std::memory_order_relaxed);
+    }
+
     maybe_autostart();
     rayman2::frontend_handle_events();
     return;
@@ -406,33 +438,45 @@ void set_frequency(uint32_t frequency) {
 
 size_t get_frames_remaining();
 
-void queue_samples(int16_t* samples, size_t count) {
-    // Report the rate and the peak once a second while bringing audio up.
-    //
-    // "Samples are being queued" and "there is sound" are different claims: a
-    // microcode that runs to completion and writes silence produces exactly the
-    // same frame count as one that works. The peak distinguishes them, and it
-    // is the only part of the audio path that can be checked without listening.
-    {
-        static const bool probe = std::getenv("RAYMAN2_AUDIOPROBE") != nullptr;
-        if (probe) {
-            using clock = std::chrono::steady_clock;
-            static clock::time_point last = clock::now();
-            static uint64_t frames = 0;
-            static int peak = 0;
-            frames += count / 2;   // count is samples; report frames
-            for (size_t i = 0; i < count; ++i) {
-                const int v = samples[i] < 0 ? -samples[i] : samples[i];
-                if (v > peak) peak = v;
-            }
-            const clock::time_point now = clock::now();
-            if (now - last >= std::chrono::seconds(1)) {
-                std::fprintf(stderr, "[rayman2] audio %llu frames/s  peak %d  queued %zu\n",
-                             (unsigned long long)frames, peak, get_frames_remaining());
-                last = now; frames = 0; peak = 0;
-            }
-        }
+// Report the rate and the peak once a second while bringing audio up.
+//
+// "Samples are being queued" and "there is sound" are different claims: a
+// microcode that runs to completion and writes silence produces exactly the
+// same frame count as one that works. The peak distinguishes them, and it is
+// the only part of the audio path that can be checked without listening.
+//
+// It measures what is actually QUEUED, after the volume has been applied, and
+// reports the gain beside it. Measuring the game's buffer instead would be
+// measuring the wrong end: the first version of the volume fix was tested with
+// a probe that read the samples before they were scaled, so it reported
+// identical peaks at 100, 50 and 0 and said nothing whatsoever about whether
+// the volume worked.
+void audio_probe(const int16_t* queued, size_t count, float gain) {
+    static const bool on = std::getenv("RAYMAN2_AUDIOPROBE") != nullptr;
+    if (!on) {
+        return;
     }
+    using clock = std::chrono::steady_clock;
+    static clock::time_point last = clock::now();
+    static uint64_t frames = 0;
+    static int peak = 0;
+
+    frames += count / 2;   // count is samples; report frames
+    for (size_t i = 0; i < count; ++i) {
+        const int v = queued[i] < 0 ? -queued[i] : queued[i];
+        if (v > peak) peak = v;
+    }
+
+    const clock::time_point now = clock::now();
+    if (now - last >= std::chrono::seconds(1)) {
+        std::fprintf(stderr, "[rayman2] audio %llu frames/s  peak %d  gain %.2f  queued %zu\n",
+                     (unsigned long long)frames, peak, static_cast<double>(gain),
+                     get_frames_remaining());
+        last = now; frames = 0; peak = 0;
+    }
+}
+
+void queue_samples(int16_t* samples, size_t count) {
 
     // `count` is int16 samples, NOT stereo frames.
     //
@@ -445,10 +489,34 @@ void queue_samples(int16_t* samples, size_t count) {
     // bytes as the game produced, which read past the buffer and made the
     // output queue grow by about sixteen thousand frames a second until the
     // sound was seconds behind the picture.
-    if (g_audio_device != 0) {
+    if (g_audio_device == 0) {
+        return;
+    }
+
+    const float gain = g_audio_gain.load(std::memory_order_relaxed);
+    if (gain >= 0.999f) {
+        audio_probe(samples, count, gain);
         SDL_QueueAudio(g_audio_device, samples,
                        static_cast<uint32_t>(count * sizeof(int16_t)));
+        return;
     }
+
+    // Scaled into scratch rather than in place: the buffer belongs to
+    // ultramodern, and quietly rewriting a caller's samples is the kind of
+    // thing that is fine until something else reads them too.
+    //
+    // No clamping is needed because the gain is never above one, so the product
+    // cannot leave int16 range. Silence at zero is still queued rather than
+    // skipped, so the output queue goes on being fed and get_frames_remaining
+    // keeps meaning what it means.
+    static thread_local std::vector<int16_t> scaled;
+    scaled.resize(count);
+    for (size_t i = 0; i < count; ++i) {
+        scaled[i] = static_cast<int16_t>(static_cast<float>(samples[i]) * gain);
+    }
+    audio_probe(scaled.data(), scaled.size(), gain);
+    SDL_QueueAudio(g_audio_device, scaled.data(),
+                   static_cast<uint32_t>(scaled.size() * sizeof(int16_t)));
 }
 
 size_t get_frames_remaining() {
