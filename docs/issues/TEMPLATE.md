@@ -49,8 +49,9 @@ most of the search space before anyone reads a line of code.
 
 ## The frame itself
 
-Turn on **Developer Mode** in the Graphics tab and press **F1** for RT64's frame
-inspector. Pause on the bad frame and walk framebuffer pairs → projections →
+Launch with `RAYMAN2_DEVMODE=1` and press **F1** for RT64's developer UI and
+frame inspector. (There is no checkbox for this: the frontend registers the
+option as hidden, and it has to be on before the renderer is built.) Pause on the bad frame and walk framebuffer pairs → projections →
 draw calls; highlighting a call shows which geometry it is.
 
 You do not have to understand what you are looking at. A screenshot of that

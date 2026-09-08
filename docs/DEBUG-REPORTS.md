@@ -127,8 +127,20 @@ most of the search space before anyone reads code:
 
 ### RT64's frame inspector
 
-The port ships a full frame debugger and it is switched off by default. Turn on
-**Developer Mode** in the Graphics tab, then:
+The port ships a full frame debugger and it is switched off by default. It is
+also not where you would look for it: RecompFrontend registers the "Dev Mode"
+option as *hidden*, so there is no checkbox in the Graphics tab, and it cannot
+be turned on while the game is running — RT64 installs the message hook that
+delivers these keys when the renderer is built, from a value read once, so
+flipping it later does nothing at all and looks exactly like the feature not
+existing.
+
+Launch with it on instead:
+
+    RAYMAN2_DEVMODE=1
+
+(or set `"developer_mode": true` in `graphics.json` to have it on permanently).
+The port prints a line confirming it. Then:
 
     F1   the frame inspector: pause, and walk framebuffer pairs -> projections
          -> draw calls. Highlighting a call shows which geometry it is; tiles,

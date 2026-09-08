@@ -174,11 +174,38 @@ create_render_context(uint8_t* rdram,
     // when frames appear relative to the game's own timing, and phase 04 needs
     // to be able to trust that what is on screen is what the game just drew.
     // Revisit alongside the high-framerate work in phase 06.
+    // Developer mode, and why the port has to be able to force it.
+    //
+    // RT64's frame inspector (F1) is the tool for a graphics bug, and reaching
+    // it takes two things that are both easy to miss.
+    //
+    // RecompFrontend registers "Dev Mode" with hidden = true, so it is never
+    // drawn in the Graphics tab: there is no checkbox to find, only a
+    // developer_mode key in graphics.json.
+    //
+    // And it cannot be turned on while the game is running. RT64 installs the
+    // Win32 message hook that delivers F1 during ApplicationWindow setup, gated
+    // on Application::usesWindowMessageFilter(), which returns
+    // userConfig.developerMode -- a value written once, in the RT64Context
+    // constructor, from the argument below. Flip the config afterwards and the
+    // hook was never installed, so the key goes nowhere and it looks like the
+    // feature does not exist.
+    //
+    // So it has to be decided here, before the renderer is built. The
+    // environment variable is the convenient way in and leaves no trace in the
+    // saved configuration; the graphics.json key still works for anyone who
+    // wants it on permanently.
+    const bool developer = developer_mode || (std::getenv("RAYMAN2_DEVMODE") != nullptr);
+    if (developer) {
+        std::fprintf(stderr, "[rayman2] developer mode on: F1 frame inspector, "
+                             "F3 view RDRAM, F4 texture replacements\n");
+    }
+
     auto context = recompui::renderer::create_render_context(
         rdram,
         window_handle,
         presentation_mode(),
-        developer_mode);
+        developer);
 
     // Chain the draw hook, once. The guard matters if the renderer is ever
     // recreated: wrapping our own wrapper would recurse until the stack ran
