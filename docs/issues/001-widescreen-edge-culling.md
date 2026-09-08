@@ -633,3 +633,31 @@ the camera at all and the next stop is the object-visibility code itself, found
 by tracing what reads the camera object around the point where geometry is
 accepted or rejected. That is a real reverse-engineering task and should be
 entered deliberately rather than drifted into.
+
+## The two existing hooks are screen shake, not widescreen
+
+Read before writing anything new, and worth the ten minutes.
+
+`func_800996EC` and `func_800997A8` are the same shape as each other. Both index
+a 128-entry sine table at `D_800E0EC4` using a running time value at
+`D_800CA4B8`, converted to a table index by multiplying by 20.37183 -- which is
+128/2*PI -- and masking with 0x7F. Both then add a scaled sine to the fovy and
+the aspect through the pointers they were given:
+
+    func_800996EC   fovy += -1.9  * sin(t*2)      aspect += 0.1   * sin(t*2)
+    func_800997A8   fovy += -0.1  * sin(t*35)     aspect += 0.006 * sin(t*35)
+
+A slow large wobble and a fast small one, each behind its own flag. That is
+camera shake, not an aspect-ratio mechanism, and there is nothing here to
+repurpose.
+
+**But it corroborates the diagnosis, and from the game's own behaviour rather
+than from an experiment.** Rayman 2 already perturbs both its fovy and its
+aspect at exactly the point four attempts wrote to them -- every frame, while
+the screen is shaking. Screen shake does not make scenery wink in and out at the
+edges. So the game's own code demonstrates that what is written here does not
+reach the visibility test, which is the conclusion those four attempts reached
+the expensive way.
+
+It leaves the recommendation unchanged: the camera object's field of view at
+`+0x68` is upstream of this point and is the next thing to try.
