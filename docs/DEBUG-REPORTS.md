@@ -144,9 +144,25 @@ The port prints a line confirming it. Then:
 
     F1   the frame inspector: pause, and walk framebuffer pairs -> projections
          -> draw calls. Highlighting a call shows which geometry it is; tiles,
-         textures and samplers are inspectable, and there is a free camera.
+         textures and samplers are inspectable.
     F3   view RDRAM directly
-    F4   texture replacements
+    F4   pause and resume the frame
+
+The Debugger tab also carries the frame's draw call and triangle counts, which
+are worth watching on their own: a step in the count as the camera pans past the
+moment something vanishes says the game stopped submitting it, and a steady
+count says it is still being sent and lost later.
+
+**The free camera is driven by the middle mouse button**, which is not written
+down anywhere and looks exactly like a broken feature if you try to fly it with
+the keyboard:
+
+    middle-drag              pan
+    Left Ctrl + middle-drag  move forwards and back
+    Left Alt + middle-drag   rotate
+
+It is ignored while the cursor is over the panel, so drag on the game itself.
+Tick "Free Camera Enabled" first.
 
 You do not have to understand what you are looking at. Pausing on the bad frame
 and screenshotting that panel is already far more useful than a screenshot of

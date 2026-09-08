@@ -44,6 +44,8 @@ namespace fs = std::filesystem;
 namespace {
 
 std::mutex g_mutex;
+// Serialises whole crash blocks; see crash_begin.
+std::mutex g_crash_mutex;
 std::FILE* g_file = nullptr;
 fs::path g_path;
 std::chrono::steady_clock::time_point g_start;
@@ -181,6 +183,36 @@ std::string cpu_brand() {
 }
 #endif
 
+// When this BINARY was linked, read out of its own PE header.
+//
+// __DATE__ and __TIME__ were the obvious thing and are a trap: they are baked
+// into this translation unit's object file, so they stop moving as soon as this
+// file stops changing, while the executable around it goes on being relinked.
+// A report from a fresh build then claims an old timestamp, and anyone
+// symbolising a crash against "the build named in the report" is working from
+// the wrong binary and gets confident, plausible, wrong function names. That
+// happened, and cost a correct diagnosis.
+//
+// The PE header's TimeDateStamp is written by the linker, so it moves whenever
+// the executable does.
+std::string build_stamp() {
+#ifdef _WIN32
+    const HMODULE module = GetModuleHandleW(nullptr);
+    if (module != nullptr) {
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(module);
+        if (dos->e_magic == IMAGE_DOS_SIGNATURE) {
+            const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+                reinterpret_cast<const uint8_t*>(module) + dos->e_lfanew);
+            if (nt->Signature == IMAGE_NT_SIGNATURE) {
+                const std::time_t linked = static_cast<std::time_t>(nt->FileHeader.TimeDateStamp);
+                return wall_clock(linked) + " (from the executable's PE header)";
+            }
+        }
+    }
+#endif
+    return std::string(__DATE__) + " " + __TIME__ + " (this file's compile time -- may be older than the build)";
+}
+
 void write_header(const std::string& port_version) {
     std::fprintf(g_file,
         "================================================================\n"
@@ -218,7 +250,7 @@ void write_header(const std::string& port_version) {
         "  port version       %s\n"
         "  frontend           %s\n"
         "  configuration      %s\n"
-        "  compiled           %s %s\n",
+        "  linked             %s\n",
         port_version.c_str(),
 #ifdef RAYMAN2_ENABLE_FRONTEND
         "enabled (launcher and config menus)",
@@ -230,7 +262,7 @@ void write_header(const std::string& port_version) {
 #else
         "debug",
 #endif
-        __DATE__, __TIME__);
+        build_stamp().c_str());
 
 #ifdef _WIN32
     MEMORYSTATUSEX memory{};
@@ -606,6 +638,15 @@ void error(const char* category, const char* fmt, ...) {
 
 void crash_begin(const char* kind) {
     g_crashes.fetch_add(1);
+
+    // Hold this for the whole block, not just this line.
+    //
+    // Two threads faulting at once produced a report whose two crashes were
+    // shuffled line by line into each other -- stack frames from one appearing
+    // in the middle of the other's -- which is close to unreadable and exactly
+    // when readability matters most. The lock is released in crash_end.
+    g_crash_mutex.lock();
+
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_file != nullptr) {
         write_line("CRASH", "crash", "================ BEGIN CRASH REPORT ================");
@@ -647,10 +688,9 @@ void crash_line(const char* fmt, ...) {
 }
 
 void crash_end() {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (g_file == nullptr) {
-        return;
-    }
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (g_file != nullptr) {
     std::fprintf(g_file,
         "  \n"
         "  What to do with this: send the whole file. The lines above the\n"
@@ -666,7 +706,10 @@ void crash_end() {
         "  That needs a build made with debug information\n"
         "  (-DCMAKE_BUILD_TYPE=RelWithDebInfo); a plain release build resolves\n"
         "  to the nearest exported symbol only.\n");
-    write_line("CRASH", "crash", "================= END CRASH REPORT =================");
+            write_line("CRASH", "crash", "================= END CRASH REPORT =================");
+        }
+    }
+    g_crash_mutex.unlock();
 }
 
 int error_count() { return g_errors.load(); }
