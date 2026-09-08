@@ -55,11 +55,25 @@ namespace {
 
 using clock_type = std::chrono::high_resolution_clock;
 
-// How many VI fields each game frame is allowed to occupy.
+// How many VI fields each game frame is allowed to occupy. OFF by default.
 //
-// Two, because the defect is that the game runs at exactly twice its intended
-// speed against a 60 Hz field rate, so one frame every two fields is 30 a
-// second.
+// This started as a fix for docs/issues/004 and shipped disabled, because the
+// diagnosis behind it was too broad and playtesting said so.
+//
+// The reasoning was: the game's loop blocks until the RDP reports finished,
+// this runtime reports finished instantly, so the loop is paced by nothing and
+// the whole game runs at twice its intended speed. The first half of that is
+// right. The conclusion is not. Play says gameplay runs at the correct speed
+// uncapped and only the attract-mode demos are fast, which fits a game whose
+// physics advance on elapsed time -- and so self-correct at any frame rate --
+// while demo playback is frame-indexed, one recorded input per frame, and
+// therefore doubles when the frame rate does.
+//
+// So a global cap fixes a cosmetic defect in attract mode and costs the rest of
+// the game half its frames, which is a bad trade and was rejected as one. It is
+// kept, off, behind RAYMAN2_FRAMECAP, because the machinery is correct and the
+// measurement is worth repeating when the demo is worth fixing properly -- see
+// docs/issues/004 for what that needs.
 //
 // Expressed in FIELDS rather than in a frame rate, because fields are the only
 // thing the game's frame can actually be aligned to and a rate that is not a
@@ -69,7 +83,7 @@ using clock_type = std::chrono::high_resolution_clock;
 // visible rather than mysterious.
 int fields_per_frame() {
     static const int fields = []() {
-        int value = 2;
+        int value = 0;   // off: the game keeps every frame it produces
         if (const char* env = std::getenv("RAYMAN2_FRAMECAP")) {
             const long asked = std::strtol(env, nullptr, 10);
             if (asked <= 0) {
@@ -307,8 +321,14 @@ std::chrono::high_resolution_clock::time_point pace_deadline() {
     return deadline;
 }
 
-// Install it. Called once, before the game starts.
+// Install it, only if there is anything to do.
+//
+// With no pacer installed ultramodern completes the RDP exactly as it always
+// did, so "off" costs not even an indirect call per frame.
 void install_frame_pacing() {
+    if (fields_per_frame() <= 0) {
+        return;
+    }
     ultramodern::set_dp_completion_pacer(pace_deadline);
 }
 

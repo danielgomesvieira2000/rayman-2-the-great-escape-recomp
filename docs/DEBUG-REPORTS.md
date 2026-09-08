@@ -259,9 +259,14 @@ half an hour.
     RSPDMATRACE=1                      list every distinct 4 KB RDRAM page a
                                        microcode reads or writes
     RAYMAN2_FRAMECAP=<n>               cap the game's loop at n display lists a
-                                       second (default 30; 0 disables it and
-                                       the game runs at double speed --
-                                       docs/issues/004)
+                                       second. OFF by default: only the
+                                       attract-mode demos run fast, and capping
+                                       everything to fix them costs the rest of
+                                       the game half its frames. 30 restores the
+                                       cap -- docs/issues/004
+    RAYMAN2_PACEMARGIN=<ms>            how far before the field boundary a
+                                       capped frame completes (default 6; only
+                                       meaningful with the cap on)
     RAYMAN2_PACEPROBE=1                report the gap between consecutive game
                                        frames in VI fields -- one bucket means
                                        the pacing is even, several means judder

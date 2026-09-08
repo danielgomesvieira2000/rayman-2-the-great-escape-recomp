@@ -1,7 +1,8 @@
 # 004 — the game runs at double speed; the attract-mode demos show it
 
-**Status:** fixed in `src/frame_pacing.cpp`. The residual inaccuracy is
-described under Fix.
+**Status:** open, and the fix is shipped **disabled**. The mechanism below is
+right and the conclusion drawn from it was too broad -- see "Correction: only
+the demo is fast". `RAYMAN2_FRAMECAP=30` re-enables it.
 
 ## What is wrong
 
@@ -87,6 +88,57 @@ probe cannot see it. The claim has been corrected in that document.
 Time one demo in the port against the same demo on a console or an accurate
 emulator. If ours is half the length, the diagnosis is complete. This is the one
 thing here that has not been measured rather than reasoned, and it is cheap.
+
+## Correction: only the demo is fast, and a global cap is the wrong trade
+
+**The diagnosis below is half right, and the half that is wrong is the half
+that decided what to do about it.**
+
+That the game's loop is paced by RDP completion, and that this runtime completes
+it instantly, is established and unchanged. What was inferred from it -- that
+the whole game therefore runs at twice its intended speed -- was never measured.
+Everything in the measurements below is the intro cinematic and the attract
+loop, because a scripted soak has no controller and cannot get past them.
+
+Playtesting says gameplay runs at the **correct** speed uncapped, and only the
+attract-mode demos are fast. That fits a game whose physics advance on elapsed
+time -- and so come out right at any frame rate -- while demo playback is
+frame-indexed, one recorded input per frame, and therefore doubles exactly when
+the frame rate does. It also explains why the demos were the only place anyone
+noticed: they are not merely the sequence with a known duration, they are the
+part of the game that is actually wrong.
+
+So a global cap trades every frame in the game for a cosmetic defect in attract
+mode. That is a bad trade and it was rejected as one: **the cap ships off.**
+With no pacer installed ultramodern completes the RDP exactly as it always did,
+so "off" costs not even an indirect call.
+
+### What fixing the demo properly would need
+
+A way to know a demo is playing, which the port does not currently have. Two
+routes, neither attempted:
+
+* **A game-side flag.** Find the byte that says the game is in attract mode and
+  read it. Reliable once found, and finding it is a search: sample RDRAM while
+  the title screen is up and again while a demo runs -- the two are trivially
+  distinguishable by display-list rate, about 2.3 a second against 60 -- and
+  keep the addresses that are consistently one value in one state and another
+  value in the other.
+* **Inference from the port's own side.** A demo runs with no player input,
+  after the title screen, and ends when somebody presses Start. All three are
+  visible to the port. It needs no reverse engineering and it is a heuristic:
+  the intro cinematic looks the same from outside, and a wrong guess caps
+  gameplay, which is the one outcome this correction exists to prevent.
+
+The first is the right one. The second is only worth it if the first turns out
+to be hard.
+
+### What is kept
+
+The machinery, the probe and the measurements, because they are correct and
+because the demo is still wrong. `RAYMAN2_FRAMECAP=30` re-enables the cap and
+reproduces everything described below, including the judder work, which was a
+real defect in the pacing and is fixed.
 
 ## Fix
 
