@@ -44,8 +44,6 @@
 #include "ultramodern/ultramodern.hpp"
 
 namespace rayman2 {
-    // src/frame_pacing.cpp -- see there for why this is at the end of send_dl.
-    void pace_frame();
 
     // Defined here rather than in main.cpp so that the only thing that can set
     // it is the renderer actually running a frame.
@@ -287,9 +285,6 @@ void RT64Context::send_dl(const OSTask* task) {
     app->state->rsp->reset();
     app->interpreter->loadUCodeGBI(task->t.ucode & 0x3FFFFFF, task->t.ucode_data & 0x3FFFFFF, true);
     app->processDisplayLists(app->core.RDRAM, task->t.data_ptr & 0x3FFFFFF, 0, true);
-    // Last thing before ultramodern signals dp_complete, which is what the
-    // game's frame loop is blocked on. docs/issues/004.
-    rayman2::pace_frame();
 }
 
 void RT64Context::send_dummy_workload(uint32_t fb_address) {

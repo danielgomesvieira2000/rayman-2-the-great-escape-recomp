@@ -141,6 +141,53 @@ void probe(clock_type::duration delivered, clock_type::duration field) {
     worst_high = 0.0;
 }
 
+// RAYMAN2_PACEPROBE=1 also reports the PRESENTATION interval.
+//
+// The pacing probe above measures when the game was told its frame was
+// finished. That is not what the eye sees. What the eye sees is when a frame
+// reaches the screen, and the two can come apart badly -- so a run where every
+// completion is exactly two fields apart can still judder, and did.
+//
+// Reported side by side with the pacing so the difference is visible in one
+// line rather than inferred across two runs.
+void probe_presented(clock_type::duration delivered, clock_type::duration field) {
+    static const bool on = std::getenv("RAYMAN2_PACEPROBE") != nullptr;
+    if (!on || field.count() <= 0) {
+        return;
+    }
+
+    const double in_fields = static_cast<double>(delivered.count()) / static_cast<double>(field.count());
+    const int bucket = static_cast<int>(in_fields + 0.5);
+
+    static int counts[8] = {};
+    static double worst_low = 1e9;
+    static double worst_high = 0.0;
+    static clock_type::time_point last_report = clock_type::now();
+
+    counts[(bucket < 0) ? 0 : (bucket > 7 ? 7 : bucket)]++;
+    if (in_fields < worst_low) worst_low = in_fields;
+    if (in_fields > worst_high) worst_high = in_fields;
+
+    const clock_type::time_point now = clock_type::now();
+    if (now - last_report < std::chrono::seconds(5)) {
+        return;
+    }
+    last_report = now;
+
+    char line[256];
+    int used = 0;
+    for (int i = 0; i < 8; i++) {
+        if (counts[i] != 0) {
+            used += std::snprintf(line + used, sizeof(line) - used, " %df:%d", i, counts[i]);
+        }
+        counts[i] = 0;
+    }
+    std::fprintf(stderr, "[rayman2] present:%s   spread %.2f-%.2f fields\n",
+                 used > 0 ? line : " (none)", worst_low, worst_high);
+    worst_low = 1e9;
+    worst_high = 0.0;
+}
+
 } // namespace
 
 namespace rayman2 {
@@ -151,60 +198,118 @@ namespace rayman2 {
 // graphics tasks, audio tasks are dispatched from a different queue on a
 // different thread (events.cpp enqueues an SpTaskAction only for M_GFXTASK), and
 // the game itself is blocked waiting for exactly the completion being delayed.
-void pace_frame() {
-    const int fields = fields_per_frame();
-    if (fields <= 0) {
+// Called from the renderer's draw hook, once per frame that reaches the screen.
+void note_presented() {
+    static const bool on = std::getenv("RAYMAN2_PACEPROBE") != nullptr;
+    if (!on) {
         return;
     }
+    const uint32_t speed = ultramodern::get_speed_multiplier();
+    const auto field = std::chrono::duration_cast<clock_type::duration>(
+        std::chrono::nanoseconds(std::chrono::seconds(1)) / (60 * (speed == 0 ? 1 : speed)));
 
-    // The VI thread's own grid, not a timer of our own.
-    //
-    // THIS IS THE WHOLE OF IT. The first version of this slept until
-    // `previous + 1/30s`, which is a schedule with no relationship to the one
-    // the video interrupt is running, and the result was judder: 1000/30 ms is
-    // not exactly two fields, so the phase crept across a field boundary over
-    // tens of seconds and frames were shown for one field or three instead of
-    // two; and every time the game missed its deadline the phase was reset to
-    // wherever that happened to land. The picture stuttered back and forth even
-    // though the average rate was right.
-    //
-    // events.cpp puts field k at `get_start() + k/(60 * speed)`, so that is the
-    // grid a frame has to land on. Snapping to it makes the interval exactly
-    // `fields` fields every time, and the phase constant for the whole run.
+    static clock_type::time_point previous{};
+    const clock_type::time_point now = clock_type::now();
+    if (previous.time_since_epoch().count() != 0) {
+        probe_presented(now - previous, field);
+    }
+    previous = now;
+}
+
+// How far before the field boundary the completion lands. See pace_deadline.
+//
+// RAYMAN2_PACEMARGIN=<milliseconds> so the right value can be found by
+// measuring rather than by choosing, which is what it took.
+clock_type::duration pace_margin() {
+    static const clock_type::duration margin = []() {
+        int ms = 6;
+        if (const char* env = std::getenv("RAYMAN2_PACEMARGIN")) {
+            const long parsed = std::strtol(env, nullptr, 10);
+            ms = static_cast<int>(parsed < 0 ? 0 : (parsed > 15 ? 15 : parsed));
+            std::fprintf(stderr, "[rayman2] RAYMAN2_PACEMARGIN: completing %d ms before the field boundary\n", ms);
+        }
+        return std::chrono::duration_cast<clock_type::duration>(std::chrono::milliseconds(ms));
+    }();
+    return margin;
+}
+
+// When the RDP should appear to have finished this frame.
+//
+// Installed as ultramodern's dp_completion_pacer and called on the task thread
+// immediately after the display list is handed to the renderer. It RETURNS a
+// deadline; it does not wait for one.
+//
+// That distinction is the whole of the second fix. The first version slept
+// here, inside send_dl, and the frame rate came out right while the picture
+// juddered -- reported from play as "incredible judder". The task thread does
+// not only carry display lists: it also carries the ScreenUpdateActions that
+// decide which buffer the video interrupt presents. Sleeping on it holds those
+// behind the wait by an amount that varies with when the game happened to swap,
+// so the frames arrived evenly and reached the screen unevenly. Measured, the
+// game's own completions were spaced 1.87 to 2.09 fields apart while what
+// actually reached the screen ranged 1.64 to 2.33 -- and at thirty frames a
+// second, where every frame has to be held for exactly two fields, that is
+// visible.
+//
+// Returning a deadline lets ultramodern hold the completion while it goes on
+// draining the queue, so a swap is applied the moment it is posted.
+std::chrono::high_resolution_clock::time_point pace_deadline() {
+    const int fields = fields_per_frame();
+
     const uint32_t speed = ultramodern::get_speed_multiplier();
     const auto origin = ultramodern::get_start();
     const auto field = std::chrono::duration_cast<clock_type::duration>(
         std::chrono::nanoseconds(std::chrono::seconds(1)) / (60 * (speed == 0 ? 1 : speed)));
 
     const clock_type::time_point now = clock_type::now();
+    if (fields <= 0 || field.count() <= 0) {
+        return now;   // uncapped: due immediately, exactly as before
+    }
+
+    // The VI thread's own grid, not a schedule of our own. events.cpp puts
+    // field k at get_start() + k/(60 * speed); a deadline anywhere else sits at
+    // an arbitrary phase against the boundaries the picture is actually made
+    // of, and frames land on either side of one at random.
     const long long now_field = (now <= origin) ? 0 : (now - origin) / field;
 
     static long long last_field = -1;
     long long target = (last_field < 0) ? now_field : last_field + fields;
 
     // Later than its deadline: the game was slower than the cap this frame, or
-    // is drawing rarely because nothing is moving. Resync to the grid rather
-    // than carry the shortfall, which would be repaid as a burst of frames
-    // faster than the cap -- the defect being fixed, in miniature.
+    // is drawing rarely because nothing is moving. Resync rather than carry the
+    // shortfall, which would be repaid as a burst faster than the cap.
     if (target < now_field) {
         target = now_field;
     }
-
     last_field = target;
 
-    const clock_type::time_point deadline = origin + field * target;
-    if (now < deadline) {
-        ultramodern::sleep_until(deadline);
-    }
+    // Land the completion a little BEFORE the boundary, not on it.
+    //
+    // The game does not present the frame; it is told the RDP is finished, then
+    // does its own work and swaps, and the video interrupt shows whatever has
+    // been swapped in by the time it comes round. Completing exactly on a
+    // boundary is therefore the worst possible phase: the swap lands at the
+    // boundary plus however long the game's frame-end work took that frame, and
+    // that straddles the next boundary, so frames reach the screen one field
+    // apart and then three. Measured as present: 1f:35 2f:80 3f:35.
+    //
+    // A margin gives the game room to finish and swap before the boundary it is
+    // aiming at, so the same field shows it every time. It costs nothing: the
+    // RDP simply appears to have taken slightly less than the whole budget.
+    const clock_type::time_point deadline = origin + field * target - pace_margin();
 
-    // Measured after the sleep, so it is what the game was actually given
-    // rather than what it was meant to be given.
     static clock_type::time_point previous{};
-    const clock_type::time_point delivered_at = clock_type::now();
     if (previous.time_since_epoch().count() != 0) {
-        probe(delivered_at - previous, field);
+        probe(deadline - previous, field);
     }
-    previous = delivered_at;
+    previous = deadline;
+
+    return deadline;
+}
+
+// Install it. Called once, before the game starts.
+void install_frame_pacing() {
+    ultramodern::set_dp_completion_pacer(pace_deadline);
 }
 
 } // namespace rayman2

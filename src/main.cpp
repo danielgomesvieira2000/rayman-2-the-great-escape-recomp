@@ -101,6 +101,8 @@ void rayman2_stop_thread_sampler();
 namespace rayman2 { std::atomic<bool>& vi_has_ticked(); }
 // src/draw_distance.cpp
 namespace rayman2 { void update_widescreen_policy(int window_width, int window_height); }
+// src/frame_pacing.cpp -- gives the game back the frame rate the RDP imposed.
+namespace rayman2 { void install_frame_pacing(); }
 
 #ifdef RAYMAN2_ENABLE_FRONTEND
 // src/frontend.cpp -- the launcher, config menus and input binding.
@@ -142,10 +144,15 @@ namespace {
 // 50558356b059ad3fbaf5fe95380512b9dceaaf52. See docs/PHASE00-FINDINGS.md.
 constexpr uint64_t kRayman2UsaRomHash = 0x8b09d8d807f8dcbdULL;
 
-// The port's own version, shown bottom-left on the launcher. librecomp always
-// renders it as major.minor.patch, so this reads "v0.1.0"; it is also what
-// mods are checked against with minimum_recomp_version.
-const recomp::Version kProjectVersion{0, 2, 0, "-alpha"};
+// The port's own version, and the ONLY place it is written down.
+//
+// It reaches three things: the launcher, bottom-left, where librecomp renders
+// it as major.minor.patch and the suffix does not show; the BUILD block at the
+// top of every session report, via begin_session below; and the check mods are
+// held to with minimum_recomp_version. src/debug_report.cpp used to carry its
+// own copy of the string for the second of those, which is how a report comes
+// to name a build that did not produce it.
+const recomp::Version kProjectVersion{0, 2, 1, "-alpha"};
 
 // ---------------------------------------------------------------------------
 // Error reporting
@@ -689,7 +696,8 @@ int main(int argc, char** argv) {
     // that everything from here on -- the port's own output, librecomp's and
     // RT64's -- is mirrored into it, and so the crash reporter installed below
     // has somewhere to write.
-    rayman2::report::begin_session(executable_directory(), app_folder_path());
+    rayman2::report::begin_session(executable_directory(), app_folder_path(),
+                                   kProjectVersion.to_string());
 
     std::fprintf(stderr, "[rayman2] start\n");
     if (!rayman2::report::path().empty()) {
@@ -903,6 +911,11 @@ int main(int argc, char** argv) {
     // and RDP; drop VI, AI and PI), so passing a default-constructed one is
     // both the fix and a statement of what the port wants.
     ultramodern::set_message_queue_control(ultramodern::MessageQueueControl{});
+
+    // Make the RDP appear to take time. Without this the game's frame loop --
+    // a handshake that blocks until the RDP reports finished -- is paced by
+    // nothing at all and runs at twice its intended speed. docs/issues/004.
+    rayman2::install_frame_pacing();
 
     recomp::Configuration config{};
     config.argc                     = argc;
