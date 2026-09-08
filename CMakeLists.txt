@@ -175,11 +175,8 @@ set(PORT_SOURCES
     src/frame_pacing.cpp
     # RAYMAN2_DEMOSCAN: find the game's attract-mode flag. See the file.
     src/demo_scan.cpp
-    # The Cheats tab, and the memory search that finds the addresses it needs.
-    src/cheats.cpp
+    # Memory search and freeze: debugging tools for finding game values.
     src/memory_search.cpp
-    # Finds Rayman's health each session; its address is heap and moves.
-    src/health_locator.cpp
     src/register_sections.cpp
     src/spin_yield.cpp
     src/crash_report.cpp

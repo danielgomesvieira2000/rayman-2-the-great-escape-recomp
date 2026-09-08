@@ -61,18 +61,11 @@ std::vector<uint32_t> g_snapshot;      // value at the last snapshot, per candid
 std::vector<uint32_t> g_candidates;    // offsets still in the running
 bool g_started = false;
 
-// Enabled by the Cheats tab, or by RAYMAN2_MEMSEARCH=1.
-//
-// The tab is the one that matters. The first version was environment-only, and
-// there was no way to tell from inside the game whether the variable had taken
-// -- so pressing the keys and seeing nothing happen was indistinguishable from
-// the tool being broken, which is exactly what happened to the first person who
-// tried it.
-std::atomic<bool> g_enabled_by_tab{false};
-
+// RAYMAN2_MEMSEARCH=1. It announces itself when armed, because an environment
+// variable that did not take looks exactly like a tool that is broken.
 bool enabled() {
     static const bool by_env = std::getenv("RAYMAN2_MEMSEARCH") != nullptr;
-    return by_env || g_enabled_by_tab.load(std::memory_order_relaxed);
+    return by_env;
 }
 
 // Say so, once, when it becomes usable. A tool that is armed and silent looks
@@ -177,17 +170,82 @@ void narrow(const uint8_t* rdram, Direction direction) {
                                         : "went up");
 }
 
+// RAYMAN2_FREEZE=0xADDR[,0xADDR...] -- hold these words at whatever they first
+// held. Four-byte writes, once a frame.
+//
+// A blunt instrument and deliberately a debugging one. Freezing an address only
+// makes sense while you know what is at it, and most of this game's interesting
+// values live on the heap, where the same number means one thing in one session
+// and something else in the next.
+//
+// It refuses to capture 0x00000000 or 0xCCCCCCCC. The first run of it captured
+// exactly those, at startup, before a level existed -- and freezing a health
+// value at zero causes the death it was meant to prevent.
+void poll_freeze(uint8_t* rdram) {
+    struct Frozen { uint32_t address; uint32_t value; bool captured; };
+    static std::vector<Frozen> frozen = []() {
+        std::vector<Frozen> out;
+        const char* env = std::getenv("RAYMAN2_FREEZE");
+        if (env == nullptr) {
+            return out;
+        }
+        const char* p = env;
+        while (*p != ' ' && out.size() < 16) {
+            char* end = nullptr;
+            const unsigned long value = std::strtoul(p, &end, 0);
+            if (end == p) {
+                break;
+            }
+            const uint32_t address = static_cast<uint32_t>(value);
+            if (address >= 0x80000000u && address < 0x80800000u) {
+                out.push_back(Frozen{ address, 0, false });
+            }
+            p = (*end == ',') ? end + 1 : end;
+        }
+        if (!out.empty()) {
+            std::fprintf(stderr, "[rayman2] RAYMAN2_FREEZE: holding %zu address(es)\n", out.size());
+        }
+        return out;
+    }();
+
+    for (Frozen& entry : frozen) {
+        const uint32_t offset = entry.address - 0x80000000u;
+        if (!entry.captured) {
+            uint32_t seen = 0;
+            for (int i = 0; i < 4; i++) {
+                reinterpret_cast<uint8_t*>(&seen)[i] = rdram[offset + i];
+            }
+            if (seen == 0x00000000u || seen == 0xCCCCCCCCu) {
+                continue;
+            }
+            entry.value = seen;
+            entry.captured = true;
+            float as_float = 0.0f;
+            std::memcpy(&as_float, &seen, sizeof(as_float));
+            std::fprintf(stderr, "[rayman2] freeze: [0x%08X] held at 0x%08X (%.3f)\n",
+                         entry.address, seen, static_cast<double>(as_float));
+            continue;
+        }
+        for (int i = 0; i < 4; i++) {
+            rdram[offset + i] = reinterpret_cast<const uint8_t*>(&entry.value)[i];
+        }
+    }
+}
+
 } // namespace
 
 namespace rayman2 {
 
-// Set from the Cheats tab, so the search can be turned on without a relaunch.
-void memory_search_set_enabled(bool on) {
-    g_enabled_by_tab.store(on, std::memory_order_relaxed);
-}
-
 // Called once a frame from the thread that pumps events, which is where the
 // keyboard state is valid and where a capture is already polled from.
+// RAYMAN2_FREEZE, which needs to write. Separate from the search, which does not.
+void memory_freeze_poll(uint8_t* rdram) {
+    if (rdram == nullptr) {
+        return;
+    }
+    poll_freeze(rdram);
+}
+
 void memory_search_poll(const uint8_t* rdram) {
     if (!enabled() || rdram == nullptr) {
         return;

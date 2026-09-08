@@ -108,8 +108,8 @@ namespace rayman2 { void install_frame_pacing(); }
 namespace rayman2 { void demo_scan_poll(const uint8_t* rdram); }
 // src/memory_search.cpp -- RAYMAN2_MEMSEARCH only; a no-op otherwise.
 namespace rayman2 { void memory_search_poll(const uint8_t* rdram); }
-// src/cheats.cpp
-namespace rayman2::cheats { void refresh(); void apply(uint8_t* rdram); }
+// src/memory_search.cpp -- RAYMAN2_FREEZE only; a no-op otherwise.
+namespace rayman2 { void memory_freeze_poll(uint8_t* rdram); }
 
 #ifdef RAYMAN2_ENABLE_FRONTEND
 // src/frontend.cpp -- the launcher, config menus and input binding.
@@ -342,10 +342,8 @@ void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     // Looks for the game's attract-mode flag. Off unless RAYMAN2_DEMOSCAN is set.
     rayman2::demo_scan_poll(g_rdram.load(std::memory_order_acquire));
 
-    // Cheats: read the tab, then apply whatever is on. Both cheap and both
-    // no-ops when nothing is enabled.
-    rayman2::cheats::refresh();
-    rayman2::cheats::apply(g_rdram.load(std::memory_order_acquire));
+    // RAYMAN2_FREEZE, off unless asked for.
+    rayman2::memory_freeze_poll(g_rdram.load(std::memory_order_acquire));
 
     // The search that finds the addresses cheats need. Off unless asked for.
     rayman2::memory_search_poll(g_rdram.load(std::memory_order_acquire));

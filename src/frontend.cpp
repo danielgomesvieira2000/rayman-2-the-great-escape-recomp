@@ -144,9 +144,6 @@ std::filesystem::path controls_config_path() {
 
 } // namespace
 
-// src/cheats.cpp
-namespace rayman2::cheats { void create_tab(); }
-
 namespace rayman2 {
 
 // Called from main() before recomp::start(). See the note at the top of this
@@ -174,7 +171,6 @@ void frontend_init() {
     recompui::config::create_graphics_tab();
     recompui::config::create_sound_tab();
     recompui::config::create_controls_tab();
-    rayman2::cheats::create_tab();
     recompui::config::create_mods_tab();
 
     // Loads the config files from disk. Everything above must already exist.
