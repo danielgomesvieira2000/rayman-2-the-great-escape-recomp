@@ -14,6 +14,8 @@
 #include <cstdio>
 #include <exception>
 #include <cstdlib>
+#include <cstring>
+#include <stdexcept>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -27,6 +29,7 @@
 #include "ultramodern/threads.hpp"
 
 #include "controller_pak.h"
+#include "debug_report.h"
 
 #include "librecomp/game.hpp"
 #include "librecomp/rsp.hpp"
@@ -127,7 +130,11 @@ const recomp::Version kProjectVersion{0, 1, 0};
 // Error reporting
 // ---------------------------------------------------------------------------
 
+// Every one of these is an error the player was shown, so every one of them
+// belongs in the session report -- that is the whole point of the report: what
+// the player saw and what the program saw, in one place and in order.
 void message_box(const char* msg) {
+    rayman2::report::error("message-box", "%s", msg);
     std::fprintf(stderr, "[rayman2] %s\n", msg);
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Rayman 2: Recompiled", msg, window);
 }
@@ -173,6 +180,20 @@ std::filesystem::path app_folder_path() {
         return std::filesystem::current_path();
     }
     return base / "rayman2-recomp";
+}
+
+// The directory the executable sits in. The debug reports go in a folder beside
+// it, because that is where a player looking for them will look -- not in a
+// per-user application data path they would have to be told about.
+std::filesystem::path executable_directory() {
+#ifdef _WIN32
+    wchar_t buf[MAX_PATH] = {};
+    const DWORD len = GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    if (len > 0 && len < MAX_PATH) {
+        return std::filesystem::path(buf).parent_path();
+    }
+#endif
+    return std::filesystem::current_path();
 }
 
 ultramodern::gfx_callbacks_t::gfx_data_t create_gfx() {
@@ -589,11 +610,41 @@ int main(int argc, char** argv) {
     // exit (0xC0000409) that discards anything still sitting in a buffer.
     std::setvbuf(stderr, nullptr, _IONBF, 0);
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+    // Open this session's debug report before the first line is printed, so
+    // that everything from here on -- the port's own output, librecomp's and
+    // RT64's -- is mirrored into it, and so the crash reporter installed below
+    // has somewhere to write.
+    rayman2::report::begin_session(executable_directory(), app_folder_path());
+
     std::fprintf(stderr, "[rayman2] start\n");
+    if (!rayman2::report::path().empty()) {
+        std::fprintf(stderr, "[rayman2] debug report: %s\n",
+                     rayman2::report::path().string().c_str());
+    }
 
     // Installed before anything else: the fault being chased happens on a
     // renderer thread and otherwise produces no output at all.
     rayman2_install_crash_reporter();
+
+    // Prove the crash reporting works, on demand.
+    //
+    // Crash handling is the one feature that cannot be verified by using the
+    // program normally: it only runs when something has already gone wrong, and
+    // a reporter that is silently broken looks exactly like a session with no
+    // crashes in it. RAYMAN2_SELFTEST=crash raises an access violation and
+    // RAYMAN2_SELFTEST=terminate throws through a noexcept boundary, which are
+    // the two paths -- the unhandled-exception filter and std::terminate --
+    // that write a crash block. Neither can fire by accident.
+    if (const char* selftest = std::getenv("RAYMAN2_SELFTEST")) {
+        if (std::strcmp(selftest, "crash") == 0) {
+            std::fprintf(stderr, "[rayman2] self-test: raising an access violation\n");
+            *reinterpret_cast<volatile int*>(0) = 1;
+        }
+        else if (std::strcmp(selftest, "terminate") == 0) {
+            std::fprintf(stderr, "[rayman2] self-test: throwing through noexcept\n");
+            []() noexcept { throw std::runtime_error("debug report self-test"); }();
+        }
+    }
 
     SDL_SetMainReady();
 
@@ -624,11 +675,15 @@ int main(int argc, char** argv) {
         // This has to happen before the game starts, because the first thing it
         // does with the pak is read it.
         rayman2::pak::set_storage_directory(cfg);
+        rayman2::report::add_context("config directory", cfg.string());
         std::fprintf(stderr, "[rayman2] config path: %s\n", cfg.string().c_str());
     }
 
     recomp::check_all_stored_roms();
     bool have_rom = recomp::is_rom_valid(game_id);
+    rayman2::report::add_context("rom",
+        have_rom ? "a validated dump is stored in the config directory"
+                 : "none stored yet -- the launcher will ask for one");
 
     if (!have_rom && argc > 1) {
         have_rom = select_and_report(std::filesystem::path(argv[1]), game_id);
@@ -813,5 +868,9 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     timeEndPeriod(1);
 #endif
+
+    // Closes the report with its summary. A report without one was killed or
+    // crashed hard, which is a fact worth being able to read off the file.
+    rayman2::report::end_session(true);
     return EXIT_SUCCESS;
 }

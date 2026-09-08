@@ -28,8 +28,12 @@
 
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
+#include <exception>
 
 #include <windows.h>
+
+#include "debug_report.h"
 
 namespace {
 
@@ -91,7 +95,7 @@ const char* describe_state(DWORD s) {
 void report_memory(void* addr) {
     MEMORY_BASIC_INFORMATION mbi{};
     if (VirtualQuery(addr, &mbi, sizeof(mbi)) == 0) {
-        std::fprintf(stderr, "[rayman2]   VirtualQuery failed (error %lu)\n",
+        rayman2::report::crash_line("  VirtualQuery failed (error %lu)",
                      static_cast<unsigned long>(GetLastError()));
         return;
     }
@@ -99,26 +103,26 @@ void report_memory(void* addr) {
     const uintptr_t alloc_base = reinterpret_cast<uintptr_t>(mbi.AllocationBase);
     const uintptr_t here = reinterpret_cast<uintptr_t>(addr);
 
-    std::fprintf(stderr, "[rayman2]   VirtualQuery: state=%s protect=%s alloc_protect=%s\n",
+    rayman2::report::crash_line("  VirtualQuery: state=%s protect=%s alloc_protect=%s",
                  describe_state(mbi.State),
                  describe_protect(mbi.Protect),
                  describe_protect(mbi.AllocationProtect));
-    std::fprintf(stderr, "[rayman2]     region 0x%llx + 0x%llx bytes\n",
+    rayman2::report::crash_line("    region 0x%llx + 0x%llx bytes",
                  static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(mbi.BaseAddress)),
                  static_cast<unsigned long long>(mbi.RegionSize));
     if (alloc_base != 0) {
-        std::fprintf(stderr, "[rayman2]     allocation base 0x%llx, offset into it 0x%llx\n",
+        rayman2::report::crash_line("    allocation base 0x%llx, offset into it 0x%llx",
                      static_cast<unsigned long long>(alloc_base),
                      static_cast<unsigned long long>(here - alloc_base));
 
-        std::fprintf(stderr, "[rayman2]     regions from that base:\n");
+        rayman2::report::crash_line("    regions from that base:");
         uint8_t* cursor = static_cast<uint8_t*>(mbi.AllocationBase);
         for (int i = 0; i < 6; ++i) {
             MEMORY_BASIC_INFORMATION r{};
             if (VirtualQuery(cursor, &r, sizeof(r)) == 0 || r.AllocationBase != mbi.AllocationBase) {
                 break;
             }
-            std::fprintf(stderr, "[rayman2]       0x%llx  size 0x%-12llx %-8s %s\n",
+            rayman2::report::crash_line("      0x%llx  size 0x%-12llx %-8s %s",
                          static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(r.BaseAddress)),
                          static_cast<unsigned long long>(r.RegionSize),
                          describe_state(r.State),
@@ -136,6 +140,12 @@ const char* describe_code(DWORD code) {
         case EXCEPTION_INT_DIVIDE_BY_ZERO:    return "INT_DIVIDE_BY_ZERO";
         case EXCEPTION_PRIV_INSTRUCTION:      return "PRIV_INSTRUCTION";
         case EXCEPTION_IN_PAGE_ERROR:         return "IN_PAGE_ERROR";
+        // A C++ throw is delivered as an SEH exception with this code, so an
+        // uncaught one -- including one crossing a noexcept boundary -- arrives
+        // here before std::terminate gets a chance. Naming it matters: this is
+        // the code behind the silent frontend failures earlier in the project,
+        // and "exception (0xE06D7363)" tells a reader nothing at all.
+        case 0xE06D7363:                      return "CPP_EXCEPTION (an uncaught C++ exception)";
         default:                              return "exception";
     }
 }
@@ -145,18 +155,25 @@ LONG WINAPI on_unhandled_exception(EXCEPTION_POINTERS* info) {
     char where[MAX_PATH + 64] = {};
     describe_address(rec->ExceptionAddress, where, sizeof(where));
 
-    std::fprintf(stderr, "\n[rayman2] CRASH: %s (0x%08lX) at %p  %s\n",
+    rayman2::report::crash_begin(describe_code(rec->ExceptionCode));
+    rayman2::report::crash_line("%s (0x%08lX) at %p  %s",
                  describe_code(rec->ExceptionCode),
                  static_cast<unsigned long>(rec->ExceptionCode),
                  rec->ExceptionAddress, where);
-    std::fprintf(stderr, "[rayman2]   thread: %lu\n",
+    rayman2::report::crash_line("  thread: %lu",
                  static_cast<unsigned long>(GetCurrentThreadId()));
+
+    if (rec->ExceptionCode == 0xE06D7363) {
+        rayman2::report::crash_line("  a C++ exception nobody caught. If it was thrown out of a");
+        rayman2::report::crash_line("  noexcept function the process is terminated on the spot, which");
+        rayman2::report::crash_line("  is why there may be no message beyond this block.");
+    }
 
     if (rec->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && rec->NumberParameters >= 2) {
         const ULONG_PTR op = rec->ExceptionInformation[0];
         const ULONG_PTR at = rec->ExceptionInformation[1];
         const char* verb = (op == 0) ? "reading" : (op == 1) ? "writing" : "executing";
-        std::fprintf(stderr, "[rayman2]   %s address 0x%llx%s\n",
+        rayman2::report::crash_line("  %s address 0x%llx%s",
                      verb, static_cast<unsigned long long>(at),
                      at < 0x10000 ? "   (a null or near-null pointer)" : "");
         report_memory(reinterpret_cast<void*>(at));
@@ -164,22 +181,72 @@ LONG WINAPI on_unhandled_exception(EXCEPTION_POINTERS* info) {
 
     void* frames[32] = {};
     const USHORT captured = CaptureStackBackTrace(0, 32, frames, nullptr);
-    std::fprintf(stderr, "[rayman2]   stack (%u frames):\n", static_cast<unsigned>(captured));
+    rayman2::report::crash_line("  stack (%u frames):", static_cast<unsigned>(captured));
     for (USHORT i = 0; i < captured; ++i) {
         char frame_where[MAX_PATH + 64] = {};
         describe_address(frames[i], frame_where, sizeof(frame_where));
-        std::fprintf(stderr, "[rayman2]     %2u  %p  %s\n", static_cast<unsigned>(i),
+        rayman2::report::crash_line("    %2u  %p  %s", static_cast<unsigned>(i),
                      frames[i], frame_where);
     }
-    std::fflush(stderr);
+    rayman2::report::crash_end();
+    rayman2::report::end_session(false);
 
     return EXCEPTION_EXECUTE_HANDLER;   // terminate, but having said something
+}
+
+// The case the exception filter cannot see.
+//
+// An exception crossing a noexcept boundary does not reach an unhandled
+// exception filter: the runtime calls terminate and then fail-fasts, which
+// Windows raises without running filters. That is exit code 0xC0000409, and it
+// is what made the frontend's config-modal throw so opaque -- a window that
+// appeared and vanished, no message, no non-zero exit worth reading.
+//
+// std::terminate IS called first, so this catches it. Rethrowing inside the
+// handler is how the exception's own message is recovered; there is no other
+// way to reach it from here.
+void on_terminate() {
+    rayman2::report::crash_begin("TERMINATE (uncaught exception or noexcept violation)");
+
+    if (std::exception_ptr current = std::current_exception()) {
+        try {
+            std::rethrow_exception(current);
+        }
+        catch (const std::exception& e) {
+            rayman2::report::crash_line("exception: %s", e.what());
+        }
+        catch (...) {
+            rayman2::report::crash_line("exception: not derived from std::exception");
+        }
+    }
+    else {
+        rayman2::report::crash_line("no active exception -- terminate was called directly");
+    }
+
+    rayman2::report::crash_line("  thread: %lu",
+                                static_cast<unsigned long>(GetCurrentThreadId()));
+
+    void* frames[32] = {};
+    const USHORT captured = CaptureStackBackTrace(0, 32, frames, nullptr);
+    rayman2::report::crash_line("  stack (%u frames):", static_cast<unsigned>(captured));
+    for (USHORT i = 0; i < captured; ++i) {
+        char frame_where[MAX_PATH + 64] = {};
+        describe_address(frames[i], frame_where, sizeof(frame_where));
+        rayman2::report::crash_line("    %2u  %p  %s", static_cast<unsigned>(i),
+                                    frames[i], frame_where);
+    }
+
+    rayman2::report::crash_end();
+    rayman2::report::end_session(false);
+
+    std::abort();
 }
 
 } // namespace
 
 void rayman2_install_crash_reporter() {
     SetUnhandledExceptionFilter(on_unhandled_exception);
+    std::set_terminate(on_terminate);
 }
 
 #else

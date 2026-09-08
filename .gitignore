@@ -78,3 +78,6 @@ desktop.ini
 /recomp/undefined_syms_auto.txt
 /recomp/ignored_syms.txt
 /recomp/auto_funcs.txt
+
+# Per-session debug reports, written next to the executable at run time.
+debug-report/

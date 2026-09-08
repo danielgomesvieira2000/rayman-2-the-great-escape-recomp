@@ -168,6 +168,10 @@ set(PORT_SOURCES
     src/register_sections.cpp
     src/spin_yield.cpp
     src/crash_report.cpp
+    # The per-session debug report: what a playtester sends when something goes
+    # wrong. Mirrors stdout and stderr into it, so it carries RT64's and
+    # librecomp's messages and not only the port's.
+    src/debug_report.cpp
     src/thread_sampler.cpp
     src/debug_node.cpp)
 
