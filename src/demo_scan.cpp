@@ -195,7 +195,24 @@ void poll_watch(const uint8_t* rdram, double rate) {
 
 namespace rayman2 {
 
-// Is the game playing an attract-mode sequence right now?
+// Is the game playing an attract-mode sequence right now? NO -- see below.
+//
+// THIS DOES NOT WORK, and is kept as the record of a negative result rather
+// than as a component. Playtesting: with the cap gated on this, everything ran
+// at half speed, so it reads true during gameplay too.
+//
+// What the search actually found, then, is a flag that separates the title
+// screen from *anything the engine is running* -- which includes a demo and
+// includes play. That is a real distinction and it is not the one needed. In
+// hindsight the pointer is the tell: 0x800CE258 is far more likely the current
+// scene or level than a recorded input stream, and a scene is loaded whoever is
+// driving it.
+//
+// So the demo-versus-gameplay distinction is NOT in this structure, and the
+// next attempt should look for something that differs between two states that
+// both have a level loaded -- which the display-list rate cannot label, because
+// both run at sixty. That is the hard part, and it is why this was worth
+// trying first.
 //
 // THE SIGNATURE, and how it was found. src/demo_scan.cpp's own search, run
 // unattended over five title-to-demo cycles: 2,097,152 words narrowed to three

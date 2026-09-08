@@ -90,7 +90,7 @@ using clock_type = std::chrono::high_resolution_clock;
 // visible rather than mysterious.
 int fields_per_frame() {
     static const int fields = []() {
-        int value = 2;   // one frame every two fields: 30 a second, during demos only
+        int value = 0;   // OFF. See the block comment above: the gate does not work.
         if (const char* env = std::getenv("RAYMAN2_FRAMECAP")) {
             const long asked = std::strtol(env, nullptr, 10);
             if (asked <= 0) {
@@ -277,13 +277,12 @@ clock_type::duration pace_margin() {
 std::chrono::high_resolution_clock::time_point pace_deadline() {
     const int fields = fields_per_frame();
 
-    // Only while an attract-mode demo is playing.
+    // Intended to be only while an attract-mode demo is playing.
     //
-    // Gameplay runs at the correct speed uncapped -- its physics advance on
-    // elapsed time and come out right at any frame rate -- and capping it costs
-    // half its frames for nothing. Only the demos are frame-indexed, one
-    // recorded input per frame, and only they double. See docs/issues/004 and
-    // attract_mode_active for the flag and how it was found.
+    // It is not. attract_mode_active is true during gameplay as well -- see the
+    // note on it -- so this gate does not gate. It is left here, unreached
+    // because the cap defaults off, so that the next attempt has the shape to
+    // fill in rather than to rebuild. docs/issues/004.
     const bool attract = rayman2::attract_mode_active(rayman2::rdram_base());
     {
         static bool engaged = false;

@@ -258,11 +258,13 @@ half an hour.
                                        before yielding (default 1, max 100)
     RSPDMATRACE=1                      list every distinct 4 KB RDRAM page a
                                        microcode reads or writes
-    RAYMAN2_FRAMECAP=<n>               the rate the game's loop is held to WHILE
-                                       AN ATTRACT-MODE DEMO PLAYS (default 30;
-                                       0 disables it entirely). Only the demos
-                                       run fast; gameplay is left alone --
-                                       docs/issues/004
+    RAYMAN2_FRAMECAP=<n>               hold the game's loop to n display lists a
+                                       second. OFF by default: it fixes the
+                                       attract-mode demos, which run at double
+                                       speed, and costs the rest of the game
+                                       half its frames, because there is no
+                                       working way yet to apply it only to the
+                                       demos. 30 turns it on -- docs/issues/004
     RAYMAN2_DEMOSCAN=1                 search RDRAM for the attract-mode flag by
                                        labelling samples from the display-list
                                        rate. How the flag above was found

@@ -1,8 +1,10 @@
 # 004 — the game runs at double speed; the attract-mode demos show it
 
-**Status:** fixed. The cap applies only while an attract-mode demo is playing,
-gated on a flag found in the game's own memory. The one claim not verified here
-is noted under "What is still taken on trust".
+**Status:** open, and shipping unfixed by decision. The demos run at double
+speed; everything else is correct and smooth. The cap that fixes the demos costs
+the rest of the game half its frames, and the attempt to gate it on the demos
+failed -- see "The gate did not work". `RAYMAN2_FRAMECAP=30` re-enables the
+unconditional cap for anyone who would rather have it.
 
 ## What is wrong
 
@@ -163,15 +165,41 @@ and during the demos, pace 2.00-2.00 fields with present 2f:150, spread
 1.88-2.11 -- the cap exact and the picture even. Outside them nothing is paced
 at all.
 
-### What is still taken on trust
+### The gate did not work
+
+Playtesting: with the cap gated on that signature, **everything ran at half
+speed**. So `attract_mode_active` is true during gameplay as well, and what the
+search actually found is a flag that separates the title screen from *anything
+the engine is running* -- which includes a demo and includes play. A real
+distinction, and not the one needed.
+
+In hindsight the pointer is the tell. `0x800CE258` is far more likely the
+current scene or level than a recorded input stream, and a scene is loaded
+whoever is driving it. The reading in the section above -- "what a pointer to
+the recorded input stream would look like" -- was a story that fitted the two
+samples available and was not evidence for anything.
+
+The failure was predicted and cost one playtest rather than a release, because
+the gate logged every time it engaged and the claim it rested on was written
+down as an inference rather than a result. That is the part worth keeping.
+
+**Where the next attempt should look.** Not in this structure. The demo-versus-
+gameplay distinction has to be something that differs between two states that
+both have a level loaded, and the display-list rate cannot label those -- both
+run at sixty -- so the automated search that found this one cannot find that
+one. Labelling would have to come from somewhere else: a person driving the game
+and marking the states by hand, or a signal like whether the controller is being
+read at all.
+
+### What was taken on trust, and was wrong
 
 The search could only label the two states the port can tell apart from
 outside. **Gameplay was never sampled**, because a scripted run has no
 controller and cannot reach it, so the signature is known to separate the title
 screen from a demo and is *inferred* to separate a demo from play.
 
-That is why every engage and release is logged. If a "frame cap engaged" line
-appears while somebody is playing, this is wrong and the report will say so.
+That is why every engage and release was logged -- and it is how the failure
+above was caught in one session rather than in a release.
 
 ### What fixing the demo properly would need
 
@@ -193,7 +221,7 @@ The first was taken, and is described above. The second was not needed.
 
 ### What is kept
 
-The machinery, the probe and the measurements, because they are correct and
+The machinery, the probes and the measurements, because they are correct and
 because the demo is still wrong. `RAYMAN2_FRAMECAP=30` re-enables the cap and
 reproduces everything described below, including the judder work, which was a
 real defect in the pacing and is fixed.
