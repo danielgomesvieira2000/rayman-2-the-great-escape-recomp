@@ -25,7 +25,8 @@ hashing their contents. The extended-GBI `matrixId` command exists for games
 that have been patched to disambiguate difficult cases; an unmodified ROM does
 not need it to get interpolation at all.
 
-What had to change was one line, and it was the port's own:
+What has to change is one line, and it is the port's own -- but it is **not** on
+by default, for a reason given at the end of this document:
 
     src/render_context.cpp   PresentationMode::Console -> PresentationMode::SkipBuffering
 
@@ -85,6 +86,29 @@ rate option set to `Display`, and check that `RAYMAN2_FPSPROBE` reports the
 panel's rate while `RAYMAN2_AUDIOPROBE` still reports about 22400.
 
 If the presented rate stays at the game's own rate on such a display, the next
-thing to try is `PresentationMode::PresentEarly` in `src/render_context.cpp`,
-which submits the presentation event as soon as the display list is finished and
-so guarantees the condition above rather than relying on the VI history.
+thing to try is `PresentationMode::PresentEarly`, which submits the presentation
+event as soon as the display list is finished and so guarantees the condition
+above rather than relying on the VI history.
+
+## Why it is off by default: torn frames
+
+Presenting the buffer the game has just drawn also means presenting it while the
+game may still be drawing into it, and on Rayman 2 that is visible. Captured
+frames under `SkipBuffering` had whole regions of the scene missing and the HUD
+digits sliced off; the same scene under `Console` is complete every time. It is
+neither subtle nor rare, so it cannot be the default, and the release ships as
+`Console`.
+
+That is the real state of this work: the mechanism is understood and reachable,
+the physics question is settled, and what remains is a rendering defect in the
+mode that unlocks it. Whether it is a Rayman 2 quirk, an RT64 issue with this
+game's framebuffer usage, or something the port is doing to the VI is the next
+thing to find out.
+
+Both modes stay available without a rebuild, because the thing they unlock
+cannot be evaluated on a 60 Hz display by a game that already reaches 60:
+
+    RAYMAN2_PRESENT=skipbuffering
+    RAYMAN2_PRESENT=presentearly
+
+Anything else, including leaving it unset, is `Console`.

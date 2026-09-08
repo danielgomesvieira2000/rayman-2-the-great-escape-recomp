@@ -124,7 +124,7 @@ constexpr uint64_t kRayman2UsaRomHash = 0x8b09d8d807f8dcbdULL;
 // The port's own version, shown bottom-left on the launcher. librecomp always
 // renders it as major.minor.patch, so this reads "v0.1.0"; it is also what
 // mods are checked against with minimum_recomp_version.
-const recomp::Version kProjectVersion{0, 1, 0};
+const recomp::Version kProjectVersion{0, 1, 0, "-alpha"};
 
 // ---------------------------------------------------------------------------
 // Error reporting

@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 
 #ifdef _WIN32
@@ -61,6 +62,41 @@ namespace {
 // The initialisation is thread_local, which is the point: it runs once on
 // whichever thread RT64 ends up calling the hook from, without this code having
 // to know which thread that is.
+
+// Which presentation mode to run in.
+//
+// Console is the default and the only one this game has been shown to render
+// correctly. It presents what the VI points at, exactly as the console does.
+//
+// The other two present the framebuffer the game has just drawn instead, and
+// that is what RT64 requires before it will interpolate: PresentQueue only sets
+// interpolationEnabled when the presented framebuffer is one the workload
+// modified this frame, which under Console is never true for a double-buffered
+// game. They also present it while the game may still be drawing into it, and
+// on Rayman 2 that shows: captured frames under SkipBuffering had whole chunks
+// of the scene missing and the HUD digits sliced off. It is not subtle and it
+// is not rare, so it cannot be the default.
+//
+// It stays reachable because the interpolation it unlocks cannot be evaluated
+// on a 60 Hz display by a game that already reaches 60. On a faster panel it is
+// worth measuring -- with RAYMAN2_FPSPROBE=1 to see the rate and both eyes on
+// the picture to see the cost.
+ultramodern::renderer::PresentationMode presentation_mode() {
+    const char* requested = std::getenv("RAYMAN2_PRESENT");
+    if (requested != nullptr) {
+        if (std::strcmp(requested, "skipbuffering") == 0) {
+            std::fprintf(stderr, "[rayman2] presentation: SkipBuffering (interpolation possible; "
+                                 "expect torn frames)\n");
+            return ultramodern::renderer::PresentationMode::SkipBuffering;
+        }
+        if (std::strcmp(requested, "presentearly") == 0) {
+            std::fprintf(stderr, "[rayman2] presentation: PresentEarly (interpolation possible; "
+                                 "expect torn frames)\n");
+            return ultramodern::renderer::PresentationMode::PresentEarly;
+        }
+    }
+    return ultramodern::renderer::PresentationMode::Console;
+}
 
 RT64::RenderHookDraw* recompui_draw_hook = nullptr;
 
@@ -141,7 +177,7 @@ create_render_context(uint8_t* rdram,
     auto context = recompui::renderer::create_render_context(
         rdram,
         window_handle,
-        ultramodern::renderer::PresentationMode::SkipBuffering,
+        presentation_mode(),
         developer_mode);
 
     // Chain the draw hook, once. The guard matters if the renderer is ever

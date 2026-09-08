@@ -514,7 +514,7 @@ void begin_session(const fs::path& preferred_dir, const fs::path& fallback_dir) 
         return;
     }
 
-    write_header("0.1.0");
+    write_header("0.1.0-alpha");
     prune(dir);
 
 #ifdef _WIN32
