@@ -175,6 +175,9 @@ set(PORT_SOURCES
     src/frame_pacing.cpp
     # RAYMAN2_DEMOSCAN: find the game's attract-mode flag. See the file.
     src/demo_scan.cpp
+    # The Cheats tab, and the memory search that finds the addresses it needs.
+    src/cheats.cpp
+    src/memory_search.cpp
     src/register_sections.cpp
     src/spin_yield.cpp
     src/crash_report.cpp

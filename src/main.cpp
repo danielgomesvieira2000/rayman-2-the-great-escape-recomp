@@ -106,6 +106,10 @@ namespace rayman2 { void update_widescreen_policy(int window_width, int window_h
 namespace rayman2 { void install_frame_pacing(); }
 // src/demo_scan.cpp -- RAYMAN2_DEMOSCAN only; a no-op otherwise.
 namespace rayman2 { void demo_scan_poll(const uint8_t* rdram); }
+// src/memory_search.cpp -- RAYMAN2_MEMSEARCH only; a no-op otherwise.
+namespace rayman2 { void memory_search_poll(const uint8_t* rdram); }
+// src/cheats.cpp
+namespace rayman2::cheats { void refresh(); void apply(uint8_t* rdram); }
 
 #ifdef RAYMAN2_ENABLE_FRONTEND
 // src/frontend.cpp -- the launcher, config menus and input binding.
@@ -337,6 +341,14 @@ void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
 
     // Looks for the game's attract-mode flag. Off unless RAYMAN2_DEMOSCAN is set.
     rayman2::demo_scan_poll(g_rdram.load(std::memory_order_acquire));
+
+    // Cheats: read the tab, then apply whatever is on. Both cheap and both
+    // no-ops when nothing is enabled.
+    rayman2::cheats::refresh();
+    rayman2::cheats::apply(g_rdram.load(std::memory_order_acquire));
+
+    // The search that finds the addresses cheats need. Off unless asked for.
+    rayman2::memory_search_poll(g_rdram.load(std::memory_order_acquire));
 
     // Persist Controller Pak writes about once a second.
     //

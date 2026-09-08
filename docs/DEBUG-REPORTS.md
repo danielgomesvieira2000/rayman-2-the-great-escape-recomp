@@ -123,6 +123,38 @@ event pump simply has none, in which case the section is left out. Runs of the
 same address are collapsed with a count, so a callback invoked from a loop
 cannot flush the window and leave 32 copies of itself.
 
+## Finding an address to cheat at
+
+A cheat is a repeated write into the game's own memory, so every cheat needs an
+address, and this port has no symbols for the game's data.
+
+`src/demo_scan.cpp` can find one unattended, but only when the two states it has
+to tell apart are visible from outside -- it separated the title screen from a
+demo using the display-list rate. Most values have no such signal: nothing the
+port can see says "Rayman was damaged just now". A person playing knows, so for
+those the labelling has to come from them.
+
+`RAYMAN2_MEMSEARCH=1` is that: the standard cheat search, with the port doing
+the scanning and the player supplying the labels.
+
+    F5   start (or restart): remember every word in RDRAM
+    F6   keep only what went DOWN since the last snapshot
+    F7   keep only what is UNCHANGED since the last snapshot
+    F8   keep only what went UP since the last snapshot
+
+For health: stand somewhere safe at full health and press **F5**. Take a hit,
+press **F6**. Take another, **F6**. Walk around without being hit, **F7**.
+Usually four or five presses is enough for the list to be short enough to print.
+
+**F7 is the one that does the work.** "It went down" is true of hundreds of
+thousands of words in a running game -- timers, positions, counters -- while "it
+went down when I was hit and did not move when I was not" is true of almost
+nothing else.
+
+Confirm a candidate without rebuilding by launching with
+`RAYMAN2_HEALTH_ADDR=0x........` and turning Infinite Health on in the Cheats
+tab. When it is right, it goes into `src/cheats.cpp`.
+
 ## Soaking an intermittent failure
 
 Some failures are not reproducible one run at a time. The intro crash in
@@ -268,6 +300,16 @@ half an hour.
     RAYMAN2_DEMOSCAN=1                 search RDRAM for the attract-mode flag by
                                        labelling samples from the display-list
                                        rate. How the flag above was found
+    RAYMAN2_MEMSEARCH=1                find a value in the game's memory by
+                                       playing: F5 to start, then F6 (it went
+                                       down), F7 (unchanged) or F8 (it went up)
+                                       after each change. How a cheat's address
+                                       is found
+    RAYMAN2_HEALTH_ADDR=0x........     tell the Cheats tab where Rayman's health
+                                       is, without a rebuild, to confirm a
+                                       candidate from the search
+    RAYMAN2_HEALTH_VALUE=<n>           the value to hold health at (default: the
+                                       highest seen so far)
     RAYMAN2_WATCH=0xADDR[,0xADDR..]    print those words once a second with the
                                        display-list rate beside them
     RAYMAN2_PACEMARGIN=<ms>            how far before the field boundary a
