@@ -146,10 +146,11 @@ std::vector<Pending> g_pending;
 
 std::atomic<uint32_t> g_perspective_mtx{0};
 std::atomic<float> g_perspective_k{1.0f};
-std::atomic<float> g_aspect_multiplier{1.0f};
+std::atomic<float> g_display_aspect{0.0f};
 std::atomic<float> g_observed_aspect{300.0f / 224.0f};
 
-float aspect_scale() {
+// How much to widen THIS call's aspect, given what it asked for.
+float aspect_scale_for(float asked) {
     static const float forced = []() {
         if (const char* env = std::getenv("RAYMAN2_ASPECT")) {
             const float parsed = static_cast<float>(std::atof(env));
@@ -159,7 +160,22 @@ float aspect_scale() {
         }
         return 0.0f;   // nothing pinned; the menu decides
     }();
-    return (forced > 0.0f) ? forced : g_aspect_multiplier.load(std::memory_order_relaxed);
+    if (forced > 0.0f) {
+        return forced;
+    }
+
+    const float display = g_display_aspect.load(std::memory_order_relaxed);
+    if (!(display > 0.0f) || !(asked > 0.0f)) {
+        return 1.0f;
+    }
+
+    float k = display / asked;
+    // Never narrow: a camera already wider than the display -- which the
+    // cinematic one is -- keeps what it asked for rather than being cropped.
+    if (!(k > 1.0f)) {
+        return 1.0f;
+    }
+    return (k > 2.5f) ? 2.5f : k;
 }
 
 } // namespace
@@ -168,15 +184,13 @@ extern "C" void rayman2_scale_draw_distance(uint8_t* rdram, recomp_context* ctx)
     const float scale = current_scale();
     const int64_t caller_sp = ctx->r29;
 
-    const float aspect_multiplier = aspect_scale();
-    {
-        const float asked = bits_to_float(static_cast<int32_t>(ctx->r7));
-        if (asked > 0.1f && asked < 10.0f) {
-            g_observed_aspect.store(asked, std::memory_order_relaxed);
-        }
+    const float asked_aspect = bits_to_float(static_cast<int32_t>(ctx->r7));
+    if (asked_aspect > 0.1f && asked_aspect < 10.0f) {
+        g_observed_aspect.store(asked_aspect, std::memory_order_relaxed);
     }
+    const float aspect_multiplier = aspect_scale_for(asked_aspect);
     if (aspect_multiplier != 1.0f) {
-        float aspect = bits_to_float(static_cast<int32_t>(ctx->r7));
+        float aspect = asked_aspect;
         if (aspect > 0.1f && aspect < 10.0f) {
             aspect *= aspect_multiplier;
             uint32_t aspect_bits = 0;
@@ -244,6 +258,29 @@ namespace rayman2 {
 // to the tab, which is what makes repurposing the setting possible without
 // forking the frontend.
 void update_widescreen_policy(int window_width, int window_height) {
+    // OFF. Widening the aspect argument compounds, and the probe says so.
+    //
+    // Successive calls come back reading 1.3393, then 1.9369, then 2.5500 --
+    // and 2.55 is this code's own ceiling. The game does not pass a fresh
+    // aspect each time: it keeps the one it was given, so widening the argument
+    // widens the value the game will hand back next frame, and the view grows
+    // until it hits the clamp. An enhancement that drifts every frame is worse
+    // than the defect it was chasing.
+    //
+    // Whatever the fix turns out to be, it cannot write to a value the game
+    // reads back. That rules out the aspect argument, and it is the constraint
+    // the next attempt has to start from.
+    //
+    // RAYMAN2_WIDESCREEN=frustum re-enables it for experiments.
+    static const bool enabled = []() {
+        const char* mode = std::getenv("RAYMAN2_WIDESCREEN");
+        return (mode != nullptr) && (std::strcmp(mode, "frustum") == 0);
+    }();
+    if (!enabled) {
+        g_display_aspect.store(0.0f, std::memory_order_relaxed);
+        return;
+    }
+
     if (window_width <= 0 || window_height <= 0) {
         return;
     }
@@ -252,25 +289,22 @@ void update_widescreen_policy(int window_width, int window_height) {
     const renderer::GraphicsConfig& config = renderer::get_graphics_config();
 
     if (config.ar_option != renderer::AspectRatio::Expand) {
-        g_aspect_multiplier.store(1.0f, std::memory_order_relaxed);
+        g_display_aspect.store(0.0f, std::memory_order_relaxed);
         return;
     }
 
-    const float display_aspect = static_cast<float>(window_width) / static_cast<float>(window_height);
-    const float game_aspect = g_observed_aspect.load(std::memory_order_relaxed);
-    float multiplier = display_aspect / game_aspect;
-
-    // Never NARROW the game's view: a window taller than 4:3 would otherwise
-    // cut geometry the player could see before, which is the very defect this
-    // is here to remove. And cap the widening, because a projection stretched
-    // far enough stops looking like the game.
-    if (!(multiplier > 1.0f)) {
-        multiplier = 1.0f;
-    }
-    if (multiplier > 2.5f) {
-        multiplier = 2.5f;
-    }
-    g_aspect_multiplier.store(multiplier, std::memory_order_relaxed);
+    // Publish the DISPLAY aspect and let the hook divide, per call.
+    //
+    // Computing a single multiplier here was wrong, and measurably so. The game
+    // does not use one aspect: the probe shows 1.3393 for its ordinary camera
+    // and 1.9369 for the letterboxed cinematic one. A multiplier derived from
+    // whichever value was seen last is right for that camera and wrong for the
+    // other, and because the cinematic aspect is already wider than a 16:9
+    // display, the ratio came out below one and was clamped away to nothing --
+    // so the widening never happened at all during the very sequence being used
+    // to test it.
+    g_display_aspect.store(static_cast<float>(window_width) / static_cast<float>(window_height),
+                           std::memory_order_relaxed);
 }
 
 } // namespace rayman2

@@ -1,8 +1,8 @@
 # 001 — Geometry culled at the edges in widescreen
 
-**Status:** fix built and on by default. Needs one look from a player: does the
-culling boundary reach the edge of the frame now, and is the field of view
-unchanged?
+**Status:** open, and back to the drawing board. Three attempts, all off. The
+third failed for a reason that constrains every future one: the game reads back
+the aspect it is given, so writing to that argument compounds every frame.
 
 ---
 
@@ -418,3 +418,47 @@ cannot be compared by apparent size:
 If the answer to the second is no, the narrowing is not landing before RT64
 reads the matrix, and the next thing to check is whether the game rebuilds its
 projection after submitting.
+
+## Third attempt: the aspect argument compounds
+
+The `send_dl` wrapper was built and is correct in itself -- the matrix does stay
+wide through the game's frame and is narrowed at the handover -- but the culling
+boundary did not move, and the probe shows why.
+
+With the widening on, successive `guPerspective` calls arrive reading:
+
+    aspect=1.3393
+    aspect=1.9369
+    aspect=2.5500
+
+2.5500 is this code's own clamp ceiling. **The game does not pass a fresh aspect
+each frame: it keeps the one it was handed.** So widening the argument widens
+what comes back next time, and the value climbs until it hits the cap. An
+enhancement that drifts every frame is worse than the defect it was chasing.
+
+(1.9369 was previously read as evidence of a second, letterboxed cinematic
+camera. It was not -- it was this feedback, plus a window whose aspect had been
+changed by hand during testing. A wrong reading of a real measurement, and worth
+recording as such.)
+
+All three attempts are disabled; `RAYMAN2_WIDESCREEN=frustum` re-enables them.
+
+## The constraint for the next attempt
+
+Whatever the fix is, **it cannot write to anything the game reads back**. That
+rules out the aspect argument, which is the only input to `guPerspective` that
+governs horizontal extent.
+
+What is still unexplained is why the second attempt failed. It widened the
+aspect and restored the matrix, and the boundary did not move -- which was read
+as "the game culls from the matrix". But feedback was present in that build too,
+so the aspect was climbing there as well, and the negative result may have had
+nothing to do with where the culling reads from. That inference should be
+treated as unproven.
+
+So the open question is the same one as at the start, and it now needs answering
+directly rather than by elimination: **what does Rayman 2's visibility test
+actually read?** The honest way at it is RT64's frame inspector on a paused
+frame -- comparing the draw calls submitted at the 4:3 boundary against what is
+beyond it -- rather than more experiments that change one number and infer from
+the picture.
