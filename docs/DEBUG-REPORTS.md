@@ -142,14 +142,23 @@ the scanning and the player supplying the labels.
     F7   keep only what is UNCHANGED since the last snapshot
     F8   keep only what went UP since the last snapshot
 
+`RAYMAN2_MEMSEARCH=selftest` drives the same machinery on a timer instead of on
+keys, to prove the tool works before anyone spends time using it.
+
 For health: stand somewhere safe at full health and press **F5**. Take a hit,
 press **F6**. Take another, **F6**. Walk around without being hit, **F7**.
 Usually four or five presses is enough for the list to be short enough to print.
 
-**F7 is the one that does the work.** "It went down" is true of hundreds of
-thousands of words in a running game -- timers, positions, counters -- while "it
-went down when I was hit and did not move when I was not" is true of almost
-nothing else.
+**Alternate F6 and F7; neither is strong on its own.** Measured with
+`RAYMAN2_MEMSEARCH=selftest`, "unchanged" against the whole of RDRAM removes only
+about a quarter of it -- most of memory is code, textures and unused space that
+was never going to change. "It went down" is likewise true of a great many words
+in a running game: timers, positions, counters.
+
+What almost nothing satisfies is *both in sequence*: it went down exactly when
+Rayman was damaged, then held still exactly while he was not. The big drops come
+from the **F7 that follows an F6**, so alternate them rather than repeating
+either.
 
 ### Or take the address from an existing cheat code
 

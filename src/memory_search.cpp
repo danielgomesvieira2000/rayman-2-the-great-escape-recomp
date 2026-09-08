@@ -24,10 +24,16 @@
 // five presses. Anything that survives is a value that went down exactly when
 // Rayman was damaged and held still exactly when he was not.
 //
-// F7 is the one that does the work. "It went down" is true of hundreds of
-// thousands of words in a running game -- timers, positions, counters -- and
-// "it went down when I was hit and did not move when I was not" is true of
-// almost nothing else.
+// NEITHER KEY IS STRONG ALONE; the alternation is what works. Measured on this
+// game with RAYMAN2_MEMSEARCH=selftest, "unchanged" against the whole of RDRAM
+// only removes about a quarter -- most of memory is code, textures and unused
+// space, and none of that was going to change anyway. "It went down" is likewise
+// true of a great many words in a running game: timers, positions, counters.
+//
+// What almost nothing satisfies is BOTH IN SEQUENCE: it went down exactly when
+// Rayman was damaged, and then held still exactly while he was not. So alternate
+// F6 and F7 rather than repeating either, and expect the big drops to come from
+// the F7 that follows an F6.
 //
 // The keys avoid F1 to F4, which are RT64's, and F9, which is the capture.
 
@@ -35,6 +41,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <chrono>
 #include <vector>
 
 #include "SDL.h"
@@ -54,6 +62,21 @@ bool g_started = false;
 
 bool enabled() {
     static const bool on = std::getenv("RAYMAN2_MEMSEARCH") != nullptr;
+    return on;
+}
+
+// RAYMAN2_MEMSEARCH=selftest -- drive the search on a timer instead of on keys.
+//
+// A search tool that is quietly broken wastes the time of the one person who
+// cannot be automated, which is the whole reason this tool exists. So it can be
+// asked to prove itself: start, then filter for "unchanged" three times while
+// the attract-mode demo is running and most of memory is churning. A working
+// search drops by orders of magnitude on the first filter and then settles.
+bool selftest() {
+    static const bool on = []() {
+        const char* value = std::getenv("RAYMAN2_MEMSEARCH");
+        return value != nullptr && std::strcmp(value, "selftest") == 0;
+    }();
     return on;
 }
 
@@ -138,6 +161,22 @@ namespace rayman2 {
 // keyboard state is valid and where a capture is already polled from.
 void memory_search_poll(const uint8_t* rdram) {
     if (!enabled() || rdram == nullptr) {
+        return;
+    }
+
+    if (selftest()) {
+        using clock = std::chrono::steady_clock;
+        static const clock::time_point begin = clock::now();
+        static int step = 0;
+        const auto age = std::chrono::duration_cast<std::chrono::seconds>(clock::now() - begin).count();
+        if (step == 0 && age >= 10) {
+            step = 1;
+            start(rdram);
+        }
+        else if (step >= 1 && step <= 3 && age >= 10 + 3 * step) {
+            step++;
+            narrow(rdram, Direction::Same);
+        }
         return;
     }
 
