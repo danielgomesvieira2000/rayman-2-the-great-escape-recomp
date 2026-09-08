@@ -3,7 +3,9 @@
 #include "capture.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <fstream>
@@ -83,7 +85,28 @@ bool write_window_bmp(const fs::path& path) {
     HDC memory_dc = CreateCompatibleDC(window_dc);
     HBITMAP bitmap = CreateCompatibleBitmap(window_dc, width, height);
     HGDIOBJ previous = SelectObject(memory_dc, bitmap);
-    BitBlt(memory_dc, 0, 0, width, height, window_dc, 0, 0, SRCCOPY);
+
+    // NOT BitBlt from the window DC.
+    //
+    // That is the obvious way to screenshot a window and it does not work for
+    // this one. RT64 presents through a hardware swap chain: the GPU writes
+    // straight to the presentation surface and the window's GDI device context
+    // never sees those pixels. BitBlt returns whatever stale content happens to
+    // be in it, which here was the same frame every time -- seventeen captures
+    // over two minutes were byte for byte identical, in windowed mode as well as
+    // fullscreen, while the picture was demonstrably moving. A capture tool that
+    // silently returns the same wrong image is worse than one that fails, and
+    // docs/DEBUG-REPORTS.md has been telling players to send that file.
+    //
+    // PW_RENDERFULLCONTENT asks the compositor for the window's actual current
+    // content, which is what a screenshot means for a composited window. It
+    // needs Windows 8.1 or later; on anything older the flag is ignored and the
+    // call degrades to the old behaviour, so the fallback below is the same
+    // BitBlt rather than nothing.
+    constexpr UINT kRenderFullContent = 0x00000002;   // PW_RENDERFULLCONTENT
+    if (!PrintWindow(window, memory_dc, kRenderFullContent)) {
+        BitBlt(memory_dc, 0, 0, width, height, window_dc, 0, 0, SRCCOPY);
+    }
 
     BITMAPINFO info{};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -332,10 +355,44 @@ void take(uint8_t* rdram, const char* reason) {
     std::fprintf(stderr, "[rayman2] capture written to %s\n", dir.string().c_str());
 }
 
+// RAYMAN2_AUTOCAPTURE=<seconds> -- take a capture on a timer as well as on F9.
+//
+// F9 is right for a player who has just seen something wrong. It is no use at
+// all for a question that has to be answered without a finger on the key --
+// "does this presentation mode still tear", which needs frames from the middle
+// of an attract-mode demo several minutes into an unattended run.
+//
+// Off unless asked for, and the same code path as the hotkey, so what it writes
+// is exactly what a player would have sent.
+void poll_autocapture(uint8_t* rdram) {
+    static const int period = []() {
+        const char* env = std::getenv("RAYMAN2_AUTOCAPTURE");
+        const int seconds = (env != nullptr) ? std::atoi(env) : 0;
+        if (seconds > 0) {
+            std::fprintf(stderr, "[rayman2] RAYMAN2_AUTOCAPTURE: a capture every %d seconds\n",
+                         seconds);
+        }
+        return seconds;
+    }();
+    if (period <= 0) {
+        return;
+    }
+
+    using clock = std::chrono::steady_clock;
+    static clock::time_point next = clock::now() + std::chrono::seconds(period);
+    if (clock::now() < next) {
+        return;
+    }
+    next = clock::now() + std::chrono::seconds(period);
+    take(rdram, "RAYMAN2_AUTOCAPTURE");
+}
+
 void poll_hotkey(uint8_t* rdram) {
     if (g_dir.empty()) {
         return;
     }
+
+    poll_autocapture(rdram);
 
     // F9, because RT64 has already taken F1 to F4 for its developer shortcuts
     // and colliding with the frame inspector would be a poor joke.
