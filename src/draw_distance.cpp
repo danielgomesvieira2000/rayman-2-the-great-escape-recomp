@@ -268,6 +268,29 @@ namespace rayman2 {
 // to the tab, which is what makes repurposing the setting possible without
 // forking the frontend.
 void update_widescreen_policy(int window_width, int window_height) {
+    // OFF. The widening is stable now, and it still does not fix the culling.
+    //
+    // Four attempts, and the last one is the one that rules the whole approach
+    // out: the game's frustum was genuinely widened for the whole of its frame
+    // -- verified from both ends, the aspect held steady at the display's and
+    // the matrix was narrowed back to the un-widened value at the handover --
+    // and scenery still winks out at the sides. So Rayman 2's visibility test
+    // reads neither the aspect passed to guPerspective nor the matrix built
+    // from it, and nothing done at this function can reach it.
+    //
+    // Left in the tree because the measurements are worth more than the code:
+    // RAYMAN2_WIDESCREEN=frustum re-enables it, RAYMAN2_NARROW=0 leaves the
+    // wide matrix in place through to RT64, and RAYMAN2_DDPROBE=1 prints both
+    // ends. Whatever finds the real culling will want those.
+    static const bool enabled = []() {
+        const char* mode = std::getenv("RAYMAN2_WIDESCREEN");
+        return (mode != nullptr) && (std::strcmp(mode, "frustum") == 0);
+    }();
+    if (!enabled) {
+        g_display_aspect.store(0.0f, std::memory_order_relaxed);
+        return;
+    }
+
     if (window_width <= 0 || window_height <= 0) {
         return;
     }
@@ -355,6 +378,20 @@ namespace rayman2 {
 // sixteen of fractional parts, so [0][0] is the halfword at 0 and the halfword
 // at 32.
 void narrow_pending_projections(uint8_t* rdram) {
+    // RAYMAN2_NARROW=0 leaves the wide matrix in place all the way to RT64.
+    // Worth having as a switch: if the winking-out is RT64 clipping against the
+    // submitted matrix rather than the game culling at all, then narrowing it
+    // here is what reintroduces the boundary, and leaving it wide removes it.
+    static const bool narrowing = []() {
+        const char* env = std::getenv("RAYMAN2_NARROW");
+        return (env == nullptr) || (std::strcmp(env, "0") != 0);
+    }();
+    if (!narrowing) {
+        std::lock_guard<std::mutex> lock(g_pending_mutex);
+        g_pending.clear();
+        return;
+    }
+
     {
         static const bool on = std::getenv("RAYMAN2_DDPROBE") != nullptr;
         static int remaining = 4;

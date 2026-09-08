@@ -1,9 +1,9 @@
 # 001 — Geometry culled at the edges in widescreen
 
-**Status:** fixed and on. The compounding was the bug, not the approach --
-writing an absolute target instead of a multiplier makes the game reading the
-value back harmless. Verified numerically end to end; wants one look in
-gameplay.
+**Status:** open. Four attempts, all failed, and the fourth rules out the whole
+approach: `guPerspective` is not where this can be fixed. What is left is
+finding what Rayman 2's visibility test actually reads, which has not been
+attempted and should be done by looking rather than by inference.
 
 ---
 
@@ -500,3 +500,55 @@ The intro now draws geometry to both edges of the frame with no seam where the
 Numbers say the framing is unchanged and the culling boundary is gone. Gameplay
 is where that gets confirmed -- the mountains in the opening, and then anywhere
 scenery used to wink out at the sides.
+
+## The fourth attempt worked, and the culling stayed
+
+The absolute-target version is correct and stable. Both ends were verified: the
+aspect the game builds with holds at the display's without drifting, and the
+matrix is narrowed back to exactly the un-widened value at the handover. The
+game's frustum really was widened for the whole of its own frame.
+
+Scenery still winks out at the sides.
+
+**That rules out `guPerspective` entirely.** If the visibility test read the
+aspect argument, or the matrix built from it, a genuinely widened frustum would
+have moved the boundary. It did not. Rayman 2 culls against something else, and
+nothing done at this function can reach it.
+
+Turned off. `RAYMAN2_WIDESCREEN=frustum` re-enables the widening,
+`RAYMAN2_NARROW=0` leaves the wide matrix in place through to RT64, and
+`RAYMAN2_DDPROBE=1` prints both ends. The measurements are worth more than the
+code, and whatever finds the real culling will want them.
+
+## What four failures actually bought
+
+  * `guPerspective` is identified for certain, with its two call sites and the
+    ABI of its stack arguments -- a fixed point in a game with no decomposition.
+  * The aspect it is given is 1.3393, which is 300/224, the framebuffer.
+  * Its far plane is 8192 against a near of 32, so distance is not what limits
+    what this game draws (issue 002).
+  * The game retains the aspect it is handed, so anything written there must be
+    an absolute value rather than a multiple, or it compounds every frame.
+  * RT64 does not cull display lists: `cullDl` is a no-op.
+  * And the visibility test reads neither the aspect nor the projection matrix.
+
+## What to do next, and what not to
+
+Not another experiment that changes one number and infers from the picture. That
+has now been wrong four times, and each time the inference drawn from the
+failure was itself wrong -- a second cinematic camera that did not exist, a
+conclusion that the game culls from the matrix, a conclusion that it does not.
+Changing an input and reading a photograph is too weak an instrument for this.
+
+The next step is to look directly, with RT64's frame inspector
+(`RAYMAN2_DEVMODE=1`, then F1), paused on a frame with the seam visible, and
+answer one question that no experiment here has answered:
+
+> Is the geometry beyond the boundary **absent from the draw calls**, or is it
+> **submitted and then not drawn**?
+
+Absent means the game culled it and the hunt is in the game's own code, which is
+a reverse-engineering job of some size. Submitted means the game is innocent and
+something between the display list and the screen is dropping it, which is a
+much smaller and quite different search -- and it would explain why four changes
+to the game's frustum did nothing at all.
