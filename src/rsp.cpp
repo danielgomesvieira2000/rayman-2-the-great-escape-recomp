@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include "librecomp/rsp.hpp"
 
@@ -32,6 +33,29 @@ namespace {
     constexpr uint32_t kAudioUcodeAddress = 0x80017E60u;
 
     bool g_warned_unhandled = false;
+
+    // RAYMAN2_NOAUDIOUCODE=1 -- run with the audio microcode switched off.
+    //
+    // This is an A/B switch for docs/issues/003, not a feature. The audio
+    // microcode is the newest thing in the port and the only component that
+    // writes to arbitrary RDRAM addresses of its own accord; if the intro's
+    // intermittent null call is corruption coming from here, the intro survives
+    // with this set and does not without it. Silence is the price of the
+    // measurement and the whole of it -- everything else about the run is
+    // unchanged, which is what makes the comparison worth anything.
+    bool audio_ucode_disabled() {
+        static const bool off = []() {
+            const char* value = std::getenv("RAYMAN2_NOAUDIOUCODE");
+            const bool disabled = value != nullptr && std::strcmp(value, "0") != 0;
+            if (disabled) {
+                std::fprintf(stderr,
+                             "[rayman2] RAYMAN2_NOAUDIOUCODE: the audio microcode will not be run;"
+                             " audio tasks are reported complete and the game is silent\n" );
+            }
+            return disabled;
+        }();
+        return off;
+    }
 
     // Reports the task as finished without doing anything. See the note above.
     RspExitReason silent_task_stub(uint8_t* /*rdram*/, uint32_t /*ucode_addr*/) {
@@ -57,7 +81,7 @@ RspUcodeFunc* rayman2_get_rsp_microcode(const OSTask* task) {
     // sits at 0x80017E60, immediately after the boot stub the two microcodes
     // share and immediately before F3DEX at 0x80018C80.
     if (task->t.ucode == kAudioUcodeAddress) {
-        return rayman2_rsp_audio;
+        return audio_ucode_disabled() ? silent_task_stub : rayman2_rsp_audio;
     }
 
     if (!g_warned_unhandled) {

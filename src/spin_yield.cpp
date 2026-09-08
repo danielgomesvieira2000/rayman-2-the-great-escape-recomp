@@ -46,12 +46,47 @@
 // costs more than the latency saves. One millisecond it is.
 
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 
 #include "ultramodern/ultramodern.hpp"
+
+namespace {
+
+// RAYMAN2_YIELD_MS=<n> -- how long a spinning thread waits for an external
+// message before giving the scheduler a turn. One millisecond by default,
+// arrived at by measurement (see above).
+//
+// It is exposed as a switch for docs/issues/003. This value is the port's
+// largest single influence on when the game's threads run relative to each
+// other, and the intro's intermittent null call is a scheduling-shaped failure:
+// same build, same machine, same inputs, different outcomes. If moving this
+// moves the failure rate, the fault is a race and the search narrows to the
+// threads involved; if it does not, the whole hypothesis is out and that is
+// worth just as much.
+//
+// Clamped rather than trusted: 0 is a hot poll, which was measured to be worse
+// than sleeping, and an unbounded value would turn a spin into a stall.
+uint32_t yield_timeout_ms() {
+    static const uint32_t ms = []() -> uint32_t {
+        const char* value = std::getenv("RAYMAN2_YIELD_MS");
+        if (value == nullptr) {
+            return 1;
+        }
+        const long parsed = std::strtol(value, nullptr, 10);
+        const uint32_t clamped = static_cast<uint32_t>(parsed < 0 ? 0 : (parsed > 100 ? 100 : parsed));
+        std::fprintf(stderr, "[rayman2] RAYMAN2_YIELD_MS: spin yields wait %u ms (default 1)\n",
+                     clamped);
+        return clamped;
+    }();
+    return ms;
+}
+
+} // namespace
 
 // Deliver one pending external event and let a higher-priority runnable thread
 // take over -- what the counter interrupt would have done.
 extern "C" void rayman2_yield_in_spin(uint8_t* rdram) {
-    ultramodern::wait_for_external_message_timed(rdram, 1);
+    ultramodern::wait_for_external_message_timed(rdram, yield_timeout_ms());
     ultramodern::check_running_queue(rdram);
 }

@@ -82,11 +82,68 @@ normally: it runs only when something has already gone wrong, and a reporter
 that is silently broken produces exactly the same file as a session with no
 crashes in it. So it can be asked to prove itself:
 
-    RAYMAN2_SELFTEST=crash      raises an access violation
-    RAYMAN2_SELFTEST=terminate  throws a C++ exception through noexcept
+    RAYMAN2_SELFTEST=crash          raises an access violation
+    RAYMAN2_SELFTEST=terminate      throws a C++ exception through noexcept
+    RAYMAN2_SELFTEST=nullcall       asks for the function at 0x00000000
+    RAYMAN2_SELFTEST=nullcall-live  the same, from inside the running game
 
-Each exercises one of the two paths and should leave a report containing a crash
-block. Neither can fire by accident.
+Each exercises one of the paths and should leave a report containing a crash
+block. None of them can fire by accident.
+
+The last two are the one the recompiled game itself can reach: an indirect call
+through a pointer that resolves to no function. It is worth knowing what that
+looks like, because until v0.2.0-alpha it did not look like itself -- it printed
+one line into the mirror pipe and called `std::exit` from a game thread, and the
+teardown that followed crashed *again* underneath the live renderer and reported
+that instead. See docs/issues/003.
+
+`nullcall` fires before the game has started and so proves the reporting alone.
+`nullcall-live` fires from a game thread once the camera is building a
+projection, which is the only way to see the part of the block that matters:
+
+## The call history in a crash block
+
+Every indirect call in the recompiled game -- every `jalr`, every jump table --
+resolves its target through one function in the runtime. That function keeps the
+last 32 addresses each thread resolved, and every crash block prints them:
+
+    the last 32 addresses this thread called indirectly, oldest first.
+      0x800838AC          0x80084930 x2       0x800838AC          0x80084930 x2
+      0x800838AC          0x80084930 x2       0x800841A4          0x80084930 x4
+      ...
+
+These are **game** addresses, so they are worth more than the native stack above
+them: they resolve against this repository rather than against a matching debug
+build. `grep -rn "glabel func_800838AC" asm/` names one; the libultra ones are in
+`recomp/symbol_addrs.txt`.
+
+The history is per-thread, because a fault happens on one thread and is not
+helped by three others shuffled into it -- and a fault on the renderer or the
+event pump simply has none, in which case the section is left out. Runs of the
+same address are collapsed with a count, so a callback invoked from a loop
+cannot flush the window and leave 32 copies of itself.
+
+## Soaking an intermittent failure
+
+Some failures are not reproducible one run at a time. The intro crash in
+docs/issues/003 is the example: three launches on the reporter's machine gave
+two crashes and one clean nine-minute session, on the same build with the same
+inputs. Nothing about that can be worked on, or confirmed fixed, from a single
+run.
+
+    scripts/soak.sh --runs 20
+
+launches the port, lets it run the intro, kills it and tabulates how each run
+ended, keeping every report. It drives `build-headless` by default because that
+build starts the game itself; to soak the **shipped** configuration -- which is
+what every report so far has come from -- point it at the frontend build and let
+it press Start:
+
+    RAYMAN2_AUTOSTART=1 scripts/soak.sh --build build-fe --runs 20
+
+Anything exported reaches the runs, which is how a hypothesis gets tested: soak
+once as-is, once with `RAYMAN2_NOAUDIOUCODE=1`, once with `RAYMAN2_YIELD_MS=10`,
+and compare the three numbers.
 
 ## Graphics issues
 
@@ -182,7 +239,9 @@ half an hour.
 
 ## Environment variables
 
-    RAYMAN2_SELFTEST=crash|terminate   prove the crash reporting works (above)
+    RAYMAN2_SELFTEST=                  prove the crash reporting works (above)
+      crash|terminate|nullcall
+      |nullcall-live
     RAYMAN2_NO_MIRROR=1                do not mirror output into the report;
                                        errors and crashes are still recorded
     F9  (a key, not a variable)        capture a graphics issue: screenshot,
@@ -190,6 +249,15 @@ half an hour.
                                        stub, into debug-report/captures
     RAYMAN2_DEVMODE=1                  RT64's developer UI and frame inspector
                                        on F1 (there is no checkbox for this)
+    RAYMAN2_AUTOSTART=1                start the game without waiting for the
+                                       launcher; what makes the shipped build
+                                       scriptable (scripts/soak.sh)
+    RAYMAN2_NOAUDIOUCODE=1             do not run the audio microcode: audio
+                                       tasks complete, the game is silent
+    RAYMAN2_YIELD_MS=<n>               how long a spinning game thread waits
+                                       before yielding (default 1, max 100)
+    RSPDMATRACE=1                      list every distinct 4 KB RDRAM page a
+                                       microcode reads or writes
     RAYMAN2_DDPROBE=1                  report the game's projection arguments
     RAYMAN2_DRAWDIST=<n>               scale the projection far plane; see
                                        docs/issues/002, it changes nothing

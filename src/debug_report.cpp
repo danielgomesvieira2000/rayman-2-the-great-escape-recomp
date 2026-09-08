@@ -45,7 +45,13 @@ namespace {
 
 std::mutex g_mutex;
 // Serialises whole crash blocks; see crash_begin.
-std::mutex g_crash_mutex;
+//
+// Timed rather than plain because the mirror pump waits on it too, and the pump
+// must never be the thing that cannot make progress: a crash raised while
+// stop_mirror is already joining would otherwise hold this for the rest of a
+// shutdown that is waiting for the pump to finish. A bounded wait turns that
+// into one line printed out of order instead of a process that never exits.
+std::timed_mutex g_crash_mutex;
 std::FILE* g_file = nullptr;
 fs::path g_path;
 std::chrono::steady_clock::time_point g_start;
@@ -66,7 +72,21 @@ HANDLE g_pipe_read = nullptr;
 HANDLE g_pipe_write = nullptr;
 int g_saved_stdout = -1;
 int g_saved_stderr = -1;
-std::thread g_pump;
+
+// The pump thread, held by pointer on purpose.
+//
+// A namespace-scope std::thread has a destructor, and ~thread() on a thread
+// nobody joined calls std::terminate(). That destructor runs during the atexit
+// chain -- which is precisely the chain a fatal error used to enter, from a
+// game thread, with the pump still running -- so the program's response to one
+// crash was a second one, in teardown, and that is the one that got reported.
+// See docs/issues/003.
+//
+// A raw pointer has no destructor. The clean path still joins and deletes it in
+// stop_mirror; a path that never reaches there leaks one thread object into a
+// process that is going away, which costs nothing and cannot terminate anybody.
+std::thread* g_pump = nullptr;
+std::thread::id g_pump_id{};
 std::atomic<bool> g_pump_stop{false};
 #endif
 
@@ -352,6 +372,29 @@ const char* classify(const std::string& line) {
 }
 
 #ifdef _WIN32
+// Wait for any crash block in progress to finish, but not forever.
+//
+// A line the game printed a moment before a fault is still in the pipe when the
+// fault happens, and this thread drains it whenever it next runs -- reliably
+// somewhere between "kind:" and the first stack frame, which is the one place
+// it must not go: the block is read for its structure. Waiting for the block to
+// close puts it after instead.
+//
+// The wait is bounded, and the bound is the point. A crash raised while
+// stop_mirror is already joining this thread would hold the crash mutex for the
+// whole of a shutdown that is waiting for this thread to finish, and an
+// unbounded wait here would make that a process that never exits. Two seconds
+// is longer than any crash block takes to write and shorter than anyone would
+// wait for a window to close.
+//
+// Returns having released the lock either way: ordering is the only thing being
+// bought, and it is not worth a hang.
+void await_crash_block() {
+    if (g_crash_mutex.try_lock_for(std::chrono::seconds(2))) {
+        g_crash_mutex.unlock();
+    }
+}
+
 void pump_thread() {
     std::string partial;
     char buf[4096];
@@ -378,6 +421,8 @@ void pump_thread() {
                 line.pop_back();
             }
             if (!line.empty()) {
+                // Never in the middle of a crash block. See await_crash_block.
+                await_crash_block();
                 std::lock_guard<std::mutex> lock(g_mutex);
                 write_line(classify(line), "out", line.c_str());
             }
@@ -388,12 +433,14 @@ void pump_thread() {
         // A library that prints a long line without a newline should not be
         // able to grow this without bound.
         if (partial.size() > 64 * 1024) {
+            await_crash_block();
             std::lock_guard<std::mutex> lock(g_mutex);
             write_line(classify(partial), "out", partial.c_str());
             partial.clear();
         }
     }
     if (!partial.empty()) {
+        await_crash_block();
         std::lock_guard<std::mutex> lock(g_mutex);
         write_line(classify(partial), "out", partial.c_str());
     }
@@ -437,7 +484,8 @@ void start_mirror() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::setvbuf(stderr, nullptr, _IONBF, 0);
 
-    g_pump = std::thread(pump_thread);
+    g_pump = new std::thread(pump_thread);
+    g_pump_id = g_pump->get_id();
 }
 
 void stop_mirror() {
@@ -452,8 +500,17 @@ void stop_mirror() {
     if (g_saved_stderr >= 0) {
         _dup2(g_saved_stderr, _fileno(stderr));
     }
-    if (g_pump.joinable()) {
-        g_pump.join();
+    // Not from the pump itself. classify() counts an error line, and an error
+    // line has in the past come from output the pump was mirroring at the
+    // moment something else decided to end the session; joining a thread from
+    // inside that same thread throws resource_deadlock_would_occur, which
+    // crosses a noexcept boundary and fail-fasts with no message at all.
+    if (g_pump != nullptr && std::this_thread::get_id() != g_pump_id) {
+        if (g_pump->joinable()) {
+            g_pump->join();
+        }
+        delete g_pump;
+        g_pump = nullptr;
     }
     CloseHandle(g_pipe_read);
     g_pipe_read = nullptr;
@@ -556,6 +613,18 @@ void begin_session(const fs::path& preferred_dir, const fs::path& fallback_dir) 
 }
 
 void end_session(bool clean) {
+    // Once, whoever gets here first.
+    //
+    // There are three callers now -- the end of main, the crash reporter's
+    // filter and terminate handler, and the null-call handler -- and on a bad
+    // exit more than one of them can run. A second pass would restore file
+    // descriptors that have already been restored, join a thread that has
+    // already been deleted and append a second SUMMARY to a closed file.
+    static std::atomic<bool> ending{false};
+    if (ending.exchange(true)) {
+        return;
+    }
+
     stop_mirror();
 
     std::lock_guard<std::mutex> lock(g_mutex);

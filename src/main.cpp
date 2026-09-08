@@ -58,6 +58,11 @@
 // ---------------------------------------------------------------------------
 extern "C" void recomp_entrypoint(uint8_t* rdram, recomp_context* ctx);
 
+// librecomp's address -> function lookup. Declared here only so that
+// RAYMAN2_SELFTEST=nullcall can exercise its failure path; nothing else in
+// the port calls it, because every call to it is generated.
+extern "C" recomp_func_t* get_function(int32_t addr);
+
 // The game's entry point, wrapped so that crossing into recompiled code is
 // visible in the log. This is the phase 03 gate: everything before it is host
 // setup, everything after it is Rayman 2's own code running.
@@ -121,6 +126,10 @@ namespace rayman2 {
 // expects the port to define it. The name is fixed by that declaration, so it
 // is deliberately a plain global rather than something tidier in a namespace.
 SDL_Window* window = nullptr;
+
+// Defined at the bottom of this file, where the reason it cannot be static
+// is explained. Declared here because the event pump below needs the game id.
+extern std::vector<recomp::GameEntry> supported_games;
 
 namespace {
 
@@ -242,6 +251,44 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 #endif
 }
 
+#ifdef RAYMAN2_ENABLE_FRONTEND
+// RAYMAN2_AUTOSTART=1 -- press Start on the launcher, so a run can be scripted.
+//
+// scripts/soak.sh needs the shipped configuration launched twenty times in a
+// row, and the shipped configuration waits for somebody to click Start. Without
+// this the only soakable build is the headless one, which is a different program
+// in the ways that matter to docs/issues/003: it starts the game itself, on its
+// own thread, with no frontend, no launcher and none of recompui's threads.
+// Measuring that and reasoning about the other is how a bug survives a fix.
+//
+// It runs from the event pump rather than from a thread of its own, because
+// that is the thread that owns the window and the UI: start_game is safe
+// anywhere, hide_all_contexts is not, and the launcher itself calls both from
+// exactly here. Waiting for the renderer's first frame is the same condition
+// the non-frontend path waits on.
+void maybe_autostart() {
+    static const bool armed = std::getenv("RAYMAN2_AUTOSTART") != nullptr;
+    if (!armed) {
+        return;
+    }
+    static bool fired = false;
+    if (fired || !rayman2::vi_has_ticked().load(std::memory_order_acquire)) {
+        return;
+    }
+    fired = true;
+
+    const std::u8string game_id = supported_games[0].game_id;
+    if (!recomp::is_rom_valid(game_id)) {
+        std::fprintf(stderr, "[rayman2] RAYMAN2_AUTOSTART: no ROM has been ingested yet;"
+                             " run once by hand and choose it, then this will work\n");
+        return;
+    }
+    std::fprintf(stderr, "[rayman2] RAYMAN2_AUTOSTART: starting the game without the launcher\n");
+    recomp::start_game(game_id, {});
+    recompui::hide_all_contexts();
+}
+#endif
+
 // Pumps the OS event queue. Runs on the thread that created the window.
 void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     // Keep the Aspect Ratio setting meaning "the game renders wide". Every
@@ -277,6 +324,7 @@ void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     }
 
 #ifdef RAYMAN2_ENABLE_FRONTEND
+    maybe_autostart();
     rayman2::frontend_handle_events();
     return;
 #else
@@ -670,6 +718,17 @@ int main(int argc, char** argv) {
         else if (std::strcmp(selftest, "terminate") == 0) {
             std::fprintf(stderr, "[rayman2] self-test: throwing through noexcept\n");
             []() noexcept { throw std::runtime_error("debug report self-test"); }();
+        }
+        // The third path, and the one that was missing when it was needed.
+        //
+        // A null indirect call in the recompiled game used to print one line
+        // into a pipe and call std::exit from a game thread, and the teardown
+        // that followed crashed and reported ITSELF. The handler that replaces
+        // it is in src/crash_report.cpp; this is how to see it work without
+        // waiting for the game to do it. See docs/issues/003.
+        else if (std::strcmp(selftest, "nullcall") == 0) {
+            std::fprintf(stderr, "[rayman2] self-test: looking up a function at 0x00000000\n");
+            get_function(0);
         }
     }
 

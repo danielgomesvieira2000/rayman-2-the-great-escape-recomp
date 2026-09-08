@@ -11,6 +11,7 @@
 // while recompui's factory takes a presentation mode as well. This adapter
 // supplies it.
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -27,6 +28,20 @@
 namespace rayman2 {
     void narrow_pending_projections(uint8_t* rdram);
     uint8_t* rdram_base();
+
+    // Set once the renderer has actually presented a frame.
+    //
+    // src/rt64_context.cpp -- the non-frontend renderer -- has carried this
+    // since phase 03, where starting the game before the renderer's first tick
+    // made the VI update path dereference a video mode that did not exist yet.
+    // This build had the declaration in main.cpp and no definition anywhere,
+    // which linked only because nothing in a frontend build referred to it.
+    // Defined here rather than in main.cpp for the same reason as there: the
+    // only thing that should be able to set it is a frame having been drawn.
+    std::atomic<bool>& vi_has_ticked() {
+        static std::atomic<bool> ticked{false};
+        return ticked;
+    }
 }
 
 #include "ultramodern/renderer_context.hpp"
@@ -141,6 +156,7 @@ void count_presented_frame() {
 }
 
 void draw_hook_with_com(RenderCommandList* list, RenderFramebuffer* swap_chain_framebuffer) {
+    rayman2::vi_has_ticked().store(true, std::memory_order_release);
     count_presented_frame();
 
 #ifdef _WIN32

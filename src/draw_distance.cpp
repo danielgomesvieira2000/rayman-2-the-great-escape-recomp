@@ -187,7 +187,14 @@ float aspect_target_for(float asked) {
 
 } // namespace
 
+// src/crash_report.cpp -- RAYMAN2_SELFTEST=nullcall-live only; a no-op
+// otherwise. This hook is here because it is a game thread doing game work,
+// which is what the crash block's call history needs to be worth reading.
+extern "C" void rayman2_selftest_live_null_call();
+
 extern "C" void rayman2_scale_draw_distance(uint8_t* rdram, recomp_context* ctx) {
+    rayman2_selftest_live_null_call();
+
     const float scale = current_scale();
     const int64_t caller_sp = ctx->r29;
 
