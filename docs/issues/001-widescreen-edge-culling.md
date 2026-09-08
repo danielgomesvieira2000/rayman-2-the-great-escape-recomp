@@ -1,8 +1,9 @@
 # 001 — Geometry culled at the edges in widescreen
 
-**Status:** open, and back to the drawing board. Three attempts, all off. The
-third failed for a reason that constrains every future one: the game reads back
-the aspect it is given, so writing to that argument compounds every frame.
+**Status:** fixed and on. The compounding was the bug, not the approach --
+writing an absolute target instead of a multiplier makes the game reading the
+value back harmless. Verified numerically end to end; wants one look in
+gameplay.
 
 ---
 
@@ -462,3 +463,40 @@ actually read?** The honest way at it is RT64's frame inspector on a paused
 frame -- comparing the draw calls submitted at the 4:3 boundary against what is
 beyond it -- rather than more experiments that change one number and infer from
 the picture.
+
+## Fourth attempt: absolute, not relative
+
+The feedback was the whole problem, and it was mine rather than the game's. The
+code multiplied whatever aspect arrived, and the game hands back the aspect it
+was given, so each frame widened the last until it saturated at the clamp.
+
+Writing an **absolute** target instead of a multiplier makes that harmless: the
+game hands back 1.7778, the code decides the answer is 1.7778, and it is a fixed
+point rather than a runaway. The value the matrix is measured against is the
+first aspect the game ever asked for, captured once and never updated, so
+nothing downstream can move the reference either.
+
+Measured, stable across a whole cinematic:
+
+    guPerspective aspect=1.3393     (before the window size is known)
+    guPerspective aspect=1.9417     (and stays there -- no climb)
+
+and at the handover, both cameras narrowed back to the values an unmodified call
+would have produced:
+
+    send_dl: pending=2
+    narrow 0x800E5F38 [0][0] 0.56053 -> 1.06865 (k=1.9065)
+    narrow 0x800E7320 [0][0] 0.76328 -> 1.45518 (k=1.9065)
+
+1.06865 is cot(69.644/2)/1.3393 and 1.45518 is cot(54.118/2)/1.3393, which are
+the two cameras' un-widened horizontal scales. So the game culls against the
+frame the player sees, and RT64 parses the matrix it would have parsed anyway.
+
+The intro now draws geometry to both edges of the frame with no seam where the
+4:3 boundary used to be.
+
+## Still wants a look
+
+Numbers say the framing is unchanged and the culling boundary is gone. Gameplay
+is where that gets confirmed -- the mountains in the opening, and then anywhere
+scenery used to wink out at the sides.

@@ -149,33 +149,38 @@ std::atomic<float> g_perspective_k{1.0f};
 std::atomic<float> g_display_aspect{0.0f};
 std::atomic<float> g_observed_aspect{300.0f / 224.0f};
 
-// How much to widen THIS call's aspect, given what it asked for.
-float aspect_scale_for(float asked) {
+// The aspect the game asked for the very first time, before anything here
+// touched it. Everything is measured against this rather than against whatever
+// arrived on the current call, and that is the whole correction: the previous
+// version multiplied what it was given, the game hands back what it was given,
+// and the value climbed every frame until it hit a clamp.
+std::atomic<float> g_base_aspect{0.0f};
+
+// What this call's aspect should BE. An absolute target, so handing the game a
+// value it will hand back next frame is harmless -- the answer is the same
+// every time.
+float aspect_target_for(float asked) {
     static const float forced = []() {
         if (const char* env = std::getenv("RAYMAN2_ASPECT")) {
             const float parsed = static_cast<float>(std::atof(env));
-            if (parsed >= 0.25f && parsed <= 4.0f) {
-                return parsed;
-            }
+            return (parsed >= 0.25f && parsed <= 4.0f) ? parsed : 0.0f;
         }
-        return 0.0f;   // nothing pinned; the menu decides
+        return 0.0f;
     }();
-    if (forced > 0.0f) {
-        return forced;
+
+    const float base = g_base_aspect.load(std::memory_order_relaxed);
+    if (forced > 0.0f && base > 0.0f) {
+        return base * forced;
     }
 
     const float display = g_display_aspect.load(std::memory_order_relaxed);
     if (!(display > 0.0f) || !(asked > 0.0f)) {
-        return 1.0f;
+        return asked;
     }
 
-    float k = display / asked;
-    // Never narrow: a camera already wider than the display -- which the
-    // cinematic one is -- keeps what it asked for rather than being cropped.
-    if (!(k > 1.0f)) {
-        return 1.0f;
-    }
-    return (k > 2.5f) ? 2.5f : k;
+    // Never narrow. A camera that genuinely wants a wider view than the display
+    // keeps it; only a narrower one is opened out.
+    return (display > asked) ? display : asked;
 }
 
 } // namespace
@@ -187,19 +192,24 @@ extern "C" void rayman2_scale_draw_distance(uint8_t* rdram, recomp_context* ctx)
     const float asked_aspect = bits_to_float(static_cast<int32_t>(ctx->r7));
     if (asked_aspect > 0.1f && asked_aspect < 10.0f) {
         g_observed_aspect.store(asked_aspect, std::memory_order_relaxed);
-    }
-    const float aspect_multiplier = aspect_scale_for(asked_aspect);
-    if (aspect_multiplier != 1.0f) {
-        float aspect = asked_aspect;
-        if (aspect > 0.1f && aspect < 10.0f) {
-            aspect *= aspect_multiplier;
+
+        // The first value seen is the game's own, and is kept forever as the
+        // reference. Nothing after this point can move it, so nothing can drift.
+        float expected = 0.0f;
+        g_base_aspect.compare_exchange_strong(expected, asked_aspect, std::memory_order_relaxed);
+
+        const float base = g_base_aspect.load(std::memory_order_relaxed);
+        const float target = aspect_target_for(asked_aspect);
+
+        if (base > 0.0f && target > base * 1.001f) {
             uint32_t aspect_bits = 0;
-            std::memcpy(&aspect_bits, &aspect, sizeof(aspect_bits));
+            std::memcpy(&aspect_bits, &target, sizeof(aspect_bits));
             ctx->r7 = static_cast<int32_t>(aspect_bits);
 
-            // Remembered for the return hook, which puts [0][0] back.
+            // The factor to undo at the handover is measured against the base,
+            // not against what arrived -- what arrived may already be ours.
             g_perspective_mtx.store(static_cast<uint32_t>(ctx->r4), std::memory_order_relaxed);
-            g_perspective_k.store(aspect_multiplier, std::memory_order_relaxed);
+            g_perspective_k.store(target / base, std::memory_order_relaxed);
         }
     }
 
@@ -258,29 +268,6 @@ namespace rayman2 {
 // to the tab, which is what makes repurposing the setting possible without
 // forking the frontend.
 void update_widescreen_policy(int window_width, int window_height) {
-    // OFF. Widening the aspect argument compounds, and the probe says so.
-    //
-    // Successive calls come back reading 1.3393, then 1.9369, then 2.5500 --
-    // and 2.55 is this code's own ceiling. The game does not pass a fresh
-    // aspect each time: it keeps the one it was given, so widening the argument
-    // widens the value the game will hand back next frame, and the view grows
-    // until it hits the clamp. An enhancement that drifts every frame is worse
-    // than the defect it was chasing.
-    //
-    // Whatever the fix turns out to be, it cannot write to a value the game
-    // reads back. That rules out the aspect argument, and it is the constraint
-    // the next attempt has to start from.
-    //
-    // RAYMAN2_WIDESCREEN=frustum re-enables it for experiments.
-    static const bool enabled = []() {
-        const char* mode = std::getenv("RAYMAN2_WIDESCREEN");
-        return (mode != nullptr) && (std::strcmp(mode, "frustum") == 0);
-    }();
-    if (!enabled) {
-        g_display_aspect.store(0.0f, std::memory_order_relaxed);
-        return;
-    }
-
     if (window_width <= 0 || window_height <= 0) {
         return;
     }
@@ -368,6 +355,16 @@ namespace rayman2 {
 // sixteen of fractional parts, so [0][0] is the halfword at 0 and the halfword
 // at 32.
 void narrow_pending_projections(uint8_t* rdram) {
+    {
+        static const bool on = std::getenv("RAYMAN2_DDPROBE") != nullptr;
+        static int remaining = 4;
+        if (on && remaining-- > 0) {
+            std::lock_guard<std::mutex> lock(g_pending_mutex);
+            std::fprintf(stderr, "[rayman2] send_dl: rdram=%p pending=%zu\n",
+                         static_cast<const void*>(rdram), g_pending.size());
+        }
+    }
+
     if (rdram == nullptr) {
         return;
     }
@@ -388,6 +385,14 @@ void narrow_pending_projections(uint8_t* rdram) {
         const int32_t out = static_cast<int32_t>(narrowed * 65536.0);
         MEM_H(0, base) = static_cast<int16_t>(out >> 16);
         MEM_H(32, base) = static_cast<int16_t>(out & 0xFFFF);
+
+        static const bool on = std::getenv("RAYMAN2_DDPROBE") != nullptr;
+        static int remaining = 6;
+        if (on && remaining-- > 0) {
+            std::fprintf(stderr, "[rayman2] narrow 0x%08X [0][0] %.5f -> %.5f (k=%.4f)\n",
+                         entry.address, static_cast<double>(raw) / 65536.0, narrowed,
+                         static_cast<double>(entry.factor));
+        }
     }
     g_pending.clear();
 }
