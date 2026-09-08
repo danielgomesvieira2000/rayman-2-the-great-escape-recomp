@@ -43,6 +43,13 @@
 
 namespace {
 
+float bits_to_float(int32_t word) {
+    float value = 0.0f;
+    const uint32_t bits = static_cast<uint32_t>(word);
+    std::memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
 std::atomic<float> g_scale{1.0f};
 std::atomic<bool> g_from_env{false};
 
@@ -101,10 +108,40 @@ void probe(float fovy, float aspect, float near_plane, float far_plane, float sc
                  fovy, aspect, near_plane, far_plane, scaled);
 }
 
-float bits_to_float(int32_t word) {
-    float value = 0.0f;
-    const uint32_t bits = static_cast<uint32_t>(word);
-    std::memcpy(&value, &bits, sizeof(value));
+
+} // namespace
+
+namespace {
+
+// Scale the aspect ratio the game builds its projection from.
+//
+// This is the experiment for docs/issues/001. RT64 widens the view on its own
+// side of the display list, so the game goes on culling against the 1.3393 it
+// asks for here, and the strips widescreen adds are drawn from geometry the
+// game already discarded -- visible in the intro as a hard vertical seam at the
+// right edge of the original 4:3 frame.
+//
+// aspect arrives in $a3 as a float bit pattern, and the hook runs before the
+// prologue does `mtc1 $a3, $f22`, so writing ctx->r7 changes what the function
+// computes with. What that proves depends on what happens to the picture:
+//
+//   the seam goes and the framing is unchanged  -> culling follows this aspect
+//                                                  and rendering does not: done
+//   the seam goes and the view widens again     -> both follow it, and RT64's
+//                                                  own widening has to be
+//                                                  turned off to compensate
+//   the seam stays                              -> the culling is somewhere
+//                                                  else entirely
+float aspect_scale() {
+    static const float value = []() {
+        if (const char* env = std::getenv("RAYMAN2_ASPECT")) {
+            const float parsed = static_cast<float>(std::atof(env));
+            if (parsed >= 0.25f && parsed <= 4.0f) {
+                return parsed;
+            }
+        }
+        return 1.0f;
+    }();
     return value;
 }
 
@@ -113,6 +150,17 @@ float bits_to_float(int32_t word) {
 extern "C" void rayman2_scale_draw_distance(uint8_t* rdram, recomp_context* ctx) {
     const float scale = current_scale();
     const int64_t caller_sp = ctx->r29;
+
+    const float aspect_multiplier = aspect_scale();
+    if (aspect_multiplier != 1.0f) {
+        float aspect = bits_to_float(static_cast<int32_t>(ctx->r7));
+        if (aspect > 0.1f && aspect < 10.0f) {
+            aspect *= aspect_multiplier;
+            uint32_t aspect_bits = 0;
+            std::memcpy(&aspect_bits, &aspect, sizeof(aspect_bits));
+            ctx->r7 = static_cast<int32_t>(aspect_bits);
+        }
+    }
 
     uint32_t bits = static_cast<uint32_t>(MEM_W(0x14, caller_sp));
     float far_plane = 0.0f;

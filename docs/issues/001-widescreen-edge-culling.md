@@ -1,7 +1,8 @@
 # 001 — Geometry culled at the edges in widescreen
 
-**Status:** open, mechanism established, not yet reproduced against a specific
-place. Needs a capture.
+**Status:** open. Reproduced, the lever found and proven, and one blocker
+identified. The remaining step is a decision about what the Aspect Ratio menu
+should mean, not more investigation.
 
 ---
 
@@ -108,3 +109,78 @@ game's culling that cannot be checked against the symptom it is supposed to
 remove is a guess with a commit message attached, and this project has already
 paid once this week for shipping a rendering change that was measured but not
 looked at.
+
+---
+
+## Reproduced
+
+The opening cinematic, where the camera flies past mountains over the ocean, on
+the subtitle "THEY'VE TAKEN EVERYTHING AND REDUCED OUR PEOPLE TO SLAVES". A hard
+vertical seam appears near the right of a 1920-wide frame: the scene stops, and
+what is beyond it is wrong.
+
+The position is the confirmation. The game renders at an aspect of 1.3393, RT64
+expands to 1.7778, so the game's own view occupies 1.3393/1.7778 = 75.3% of the
+frame -- centred, that is x = 236 to x = 1683. The seam sits at the right end of
+that, which is precisely where the game stops believing anything is visible.
+
+It reaches itself: boot the port with a save already stored and the cinematic
+plays with no input at all, so this is reproducible without a controller.
+
+## The lever, proven
+
+`func_800038C0` is `guPerspective` (see [002](002-draw-distance.md)) and its
+fourth argument is the aspect ratio, arriving as 1.3393 -- which is 300/224, the
+framebuffer this game renders.
+
+Scaling that argument was tested at x2 against a frame-matched moment (the same
+subtitle, "THE ROBOTS SEARCH FOR INNOCENT PREY", in both runs). At x2 the same
+two mountains are drawn at roughly half their width with sea and sky around
+them, and the subtitle text is narrower. The horizontal field of view had
+doubled.
+
+So the game's frustum -- and whatever culling derives from it -- is downstream of
+that one argument. This is the same arrangement Beetle Adventure Racing
+describes: one set of numbers decides both what the projection draws and what
+the game bothers to submit.
+
+## Why the one-line fix does not work
+
+Widening the game's aspect widens the *rendered* view as well, and RT64 is
+already widening it. The two multiply, and the result is a view about a third
+too wide rather than a correctly culled one.
+
+The fix therefore has to move the widening rather than add to it: give the game
+the display's aspect, and stop RT64 expanding on top. The game then renders a
+wide view squeezed into its 4:3 framebuffer -- anamorphic, exactly as widescreen
+hacks for real N64 hardware do it -- and the presentation stretches it back out.
+
+## The blocker
+
+That configuration cannot currently be set, and the reason is a bug in its own
+right.
+
+`ar_option = Original` plus `pfm_option = Stretch` should do it. Setting both in
+`graphics.json` produced a pillarboxed 4:3 image: `pfm_option` was ignored.
+
+The cause is in the frontend. `apply_graphics_config()` builds a
+default-constructed `GraphicsConfig` and assigns only the options the graphics
+tab knows about, so any field the fork added and the tab does not list -- which
+is `pfm_option` and `divot_option` -- is silently reset to its default every time
+the configuration is applied. The fork's own comment beside those fields warns
+about exactly this and is the reason they carry default initialisers; what it
+does not prevent is the value being *overwritten* rather than left
+indeterminate.
+
+So `pfm_option` has no effect from the configuration file, and the anamorphic
+route cannot be tested until the port sets it itself.
+
+## What is left to decide
+
+Not an investigation -- a design choice, because the fix changes what the Aspect
+Ratio menu means. Once the game is the thing producing the widescreen view,
+RT64's Expand has to be off, and the menu option that currently reads "Expand"
+would have to drive the game's aspect instead of the renderer's.
+
+That is a small amount of code in the port and no change to the submodule. It
+wants agreeing before it is written, because it moves a user-facing setting.
