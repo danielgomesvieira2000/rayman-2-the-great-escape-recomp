@@ -1,8 +1,8 @@
 # 004 — the game runs at double speed; the attract-mode demos show it
 
-**Status:** open, and the fix is shipped **disabled**. The mechanism below is
-right and the conclusion drawn from it was too broad -- see "Correction: only
-the demo is fast". `RAYMAN2_FRAMECAP=30` re-enables it.
+**Status:** fixed. The cap applies only while an attract-mode demo is playing,
+gated on a flag found in the game's own memory. The one claim not verified here
+is noted under "What is still taken on trust".
 
 ## What is wrong
 
@@ -113,10 +113,69 @@ mode. That is a bad trade and it was rejected as one: **the cap ships off.**
 With no pacer installed ultramodern completes the RDP exactly as it always did,
 so "off" costs not even an indirect call.
 
+### The flag, and how it was found
+
+`src/demo_scan.cpp`, run unattended under `RAYMAN2_DEMOSCAN=1`. The two states
+are separable from outside without knowing anything about the game -- the title
+screen submits about two display lists a second because it is barely redrawing,
+a demo submits sixty -- so the port can label its own samples, and the flag is
+whatever word is reliably one value under one label and another under the other.
+
+An ordinary cheat search, with the labelling automated. The automation is the
+point: the attract loop alternates on its own every twenty seconds or so for as
+long as the game is left alone, so an unattended run gets a dozen transitions,
+where a person watching a memory viewer gets one per attempt and has to catch
+it. Over five cycles, 2,097,152 words narrowed to three:
+
+    603947 -> 45500 -> 400 -> 236 -> 147 -> 141 -> 119 -> 115 -> 101 -> 3
+
+    0x800E4B18   title 0x00000003   attract 0x800CE258
+    0x800E4B1C   title 0x00000001   attract 0x00000005
+    0x800E4B20   title 0x00000000   attract 0x00000003
+
+The first is a RAM pointer while a demo plays and a small integer otherwise --
+what a pointer to the recorded input stream would look like. The other two read
+as a mode enum. They are adjacent, so this is one small structure rather than
+three coincidences.
+
+`attract_mode_active` requires **all three** to match. Any one alone is a
+plausible flag and a plausible coincidence; three adjacent words agreeing is
+neither. The cost of a false positive is capping the frame rate during play,
+which is the outcome the whole mechanism exists to avoid, so the test is as
+specific as the evidence allows rather than as cheap as possible.
+
+Confirmed by watching the three through the attract loop with the display-list
+rate beside them (`RAYMAN2_WATCH`): the two value sets separate 0-22 lists a
+second from 54-62 with no overlap, and the only off-pattern samples are single
+transition windows where the half-second rate average lags the flag. The flag
+leads the rate, which is what a real state variable does and what an incidental
+correlate would not.
+
+### Measured, gated
+
+Seven engage/release cycles over two minutes, at the demo boundaries and nowhere
+else:
+
+    attract-mode demo started: frame cap engaged
+    attract-mode demo ended: frame cap released
+
+and during the demos, pace 2.00-2.00 fields with present 2f:150, spread
+1.88-2.11 -- the cap exact and the picture even. Outside them nothing is paced
+at all.
+
+### What is still taken on trust
+
+The search could only label the two states the port can tell apart from
+outside. **Gameplay was never sampled**, because a scripted run has no
+controller and cannot reach it, so the signature is known to separate the title
+screen from a demo and is *inferred* to separate a demo from play.
+
+That is why every engage and release is logged. If a "frame cap engaged" line
+appears while somebody is playing, this is wrong and the report will say so.
+
 ### What fixing the demo properly would need
 
-A way to know a demo is playing, which the port does not currently have. Two
-routes, neither attempted:
+(Kept as the record of what the choice was.) Two routes:
 
 * **A game-side flag.** Find the byte that says the game is in attract mode and
   read it. Reliable once found, and finding it is a search: sample RDRAM while
@@ -130,8 +189,7 @@ routes, neither attempted:
   the intro cinematic looks the same from outside, and a wrong guess caps
   gameplay, which is the one outcome this correction exists to prevent.
 
-The first is the right one. The second is only worth it if the first turns out
-to be hard.
+The first was taken, and is described above. The second was not needed.
 
 ### What is kept
 

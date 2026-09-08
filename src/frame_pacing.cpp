@@ -51,6 +51,13 @@
 
 #include "ultramodern/ultramodern.hpp"
 
+namespace rayman2 {
+    // src/demo_scan.cpp -- the attract-mode flag, and where it came from.
+    bool attract_mode_active(const uint8_t* rdram);
+    // src/main.cpp
+    uint8_t* rdram_base();
+}
+
 namespace {
 
 using clock_type = std::chrono::high_resolution_clock;
@@ -83,7 +90,7 @@ using clock_type = std::chrono::high_resolution_clock;
 // visible rather than mysterious.
 int fields_per_frame() {
     static const int fields = []() {
-        int value = 0;   // off: the game keeps every frame it produces
+        int value = 2;   // one frame every two fields: 30 a second, during demos only
         if (const char* env = std::getenv("RAYMAN2_FRAMECAP")) {
             const long asked = std::strtol(env, nullptr, 10);
             if (asked <= 0) {
@@ -270,6 +277,27 @@ clock_type::duration pace_margin() {
 std::chrono::high_resolution_clock::time_point pace_deadline() {
     const int fields = fields_per_frame();
 
+    // Only while an attract-mode demo is playing.
+    //
+    // Gameplay runs at the correct speed uncapped -- its physics advance on
+    // elapsed time and come out right at any frame rate -- and capping it costs
+    // half its frames for nothing. Only the demos are frame-indexed, one
+    // recorded input per frame, and only they double. See docs/issues/004 and
+    // attract_mode_active for the flag and how it was found.
+    const bool attract = rayman2::attract_mode_active(rayman2::rdram_base());
+    {
+        static bool engaged = false;
+        if (attract != engaged) {
+            engaged = attract;
+            std::fprintf(stderr, "[rayman2] attract-mode demo %s: frame cap %s\n",
+                         attract ? "started" : "ended",
+                         attract ? "engaged" : "released");
+        }
+    }
+    if (!attract) {
+        return clock_type::now();   // due immediately: uncapped, as if no pacer
+    }
+
     const uint32_t speed = ultramodern::get_speed_multiplier();
     const auto origin = ultramodern::get_start();
     const auto field = std::chrono::duration_cast<clock_type::duration>(
@@ -327,7 +355,7 @@ std::chrono::high_resolution_clock::time_point pace_deadline() {
 // did, so "off" costs not even an indirect call per frame.
 void install_frame_pacing() {
     if (fields_per_frame() <= 0) {
-        return;
+        return;   // RAYMAN2_FRAMECAP=0: never pace, not even during a demo
     }
     ultramodern::set_dp_completion_pacer(pace_deadline);
 }

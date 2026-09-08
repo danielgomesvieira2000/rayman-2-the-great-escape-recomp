@@ -173,6 +173,8 @@ set(PORT_SOURCES
     # on it. Both builds, because a measurement taken against one and a fix
     # shipped in the other is how docs/issues/004 stayed hidden.
     src/frame_pacing.cpp
+    # RAYMAN2_DEMOSCAN: find the game's attract-mode flag. See the file.
+    src/demo_scan.cpp
     src/register_sections.cpp
     src/spin_yield.cpp
     src/crash_report.cpp

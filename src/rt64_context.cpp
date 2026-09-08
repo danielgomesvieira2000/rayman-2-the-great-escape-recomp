@@ -45,6 +45,9 @@
 
 namespace rayman2 {
 
+    // src/demo_scan.cpp
+    void note_display_list();
+
     // Defined here rather than in main.cpp so that the only thing that can set
     // it is the renderer actually running a frame.
     std::atomic<bool>& vi_has_ticked() {
@@ -285,6 +288,7 @@ void RT64Context::send_dl(const OSTask* task) {
     app->state->rsp->reset();
     app->interpreter->loadUCodeGBI(task->t.ucode & 0x3FFFFFF, task->t.ucode_data & 0x3FFFFFF, true);
     app->processDisplayLists(app->core.RDRAM, task->t.data_ptr & 0x3FFFFFF, 0, true);
+    rayman2::note_display_list();
 }
 
 void RT64Context::send_dummy_workload(uint32_t fb_address) {

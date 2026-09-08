@@ -103,6 +103,8 @@ namespace rayman2 { std::atomic<bool>& vi_has_ticked(); }
 namespace rayman2 { void update_widescreen_policy(int window_width, int window_height); }
 // src/frame_pacing.cpp -- gives the game back the frame rate the RDP imposed.
 namespace rayman2 { void install_frame_pacing(); }
+// src/demo_scan.cpp -- RAYMAN2_DEMOSCAN only; a no-op otherwise.
+namespace rayman2 { void demo_scan_poll(const uint8_t* rdram); }
 
 #ifdef RAYMAN2_ENABLE_FRONTEND
 // src/frontend.cpp -- the launcher, config menus and input binding.
@@ -312,6 +314,9 @@ void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     // include/capture.h. This runs on the thread that pumps SDL events, which
     // is where the keyboard state is valid.
     rayman2::capture::poll_hotkey(g_rdram.load(std::memory_order_acquire));
+
+    // Looks for the game's attract-mode flag. Off unless RAYMAN2_DEMOSCAN is set.
+    rayman2::demo_scan_poll(g_rdram.load(std::memory_order_acquire));
 
     // Persist Controller Pak writes about once a second.
     //

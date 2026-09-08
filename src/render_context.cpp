@@ -33,6 +33,9 @@ namespace rayman2 {
     // src/frame_pacing.cpp -- the presentation half of RAYMAN2_PACEPROBE.
     void note_presented();
 
+    // src/demo_scan.cpp
+    void note_display_list();
+
     // Set once the renderer has actually presented a frame.
     //
     // src/rt64_context.cpp -- the non-frontend renderer -- has carried this
@@ -228,6 +231,7 @@ public:
     void send_dl(const OSTask* task) override {
         rayman2::narrow_pending_projections(rayman2::rdram_base());
         inner_->send_dl(task);
+        rayman2::note_display_list();
     }
 
     void send_dummy_workload(uint32_t fb_address) override { inner_->send_dummy_workload(fb_address); }
