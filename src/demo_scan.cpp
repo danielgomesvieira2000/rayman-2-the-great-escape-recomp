@@ -179,14 +179,23 @@ void poll_watch(const uint8_t* rdram, double rate) {
         return;
     }
 
-    char line[256];
+    // Decoded three ways, because which one is meaningful is exactly what is not
+    // known yet. A game value that looks like noise as an integer is often an
+    // obvious float -- 0x41200000 is 10.0, and a health gauge stepping 10, 8, 6
+    // is unmistakable where the same thing in hex is not.
+    char line[512];
     int used = 0;
     for (uint32_t address : addresses) {
         const uint32_t offset = address - 0x80000000u;
         if (offset >= kRamSize) {
             continue;
         }
-        used += std::snprintf(line + used, sizeof(line) - used, " %08X", raw_word(rdram, offset));
+        const uint32_t raw = raw_word(rdram, offset);
+        float as_float = 0.0f;
+        std::memcpy(&as_float, &raw, sizeof(as_float));
+        used += std::snprintf(line + used, sizeof(line) - used,
+                              "  [%08X] %08X %11d %12.3f", address, raw,
+                              static_cast<int32_t>(raw), static_cast<double>(as_float));
     }
     std::fprintf(stderr, "[rayman2] watch:%s   (%.0f lists/s)\n", line, rate);
 }

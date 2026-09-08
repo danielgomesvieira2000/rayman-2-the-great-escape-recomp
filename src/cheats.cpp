@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <variant>
 
@@ -97,9 +98,37 @@ uint32_t configured_health_address() {
     return address;
 }
 
-// The value to hold health at. Whatever it reads at full health, which is not
-// known either until the address is; RAYMAN2_HEALTH_VALUE supplies it for
-// testing, and -1 means "whatever the highest value seen so far was".
+// The value to hold health at, as a float.
+//
+// Rayman 2 keeps health as an IEEE-754 float: the search turned up 0x41200000
+// and 0x42480000 at the candidate addresses, which are 10.0 and 50.0, and the
+// candidates stayed in exact proportion to each other across two sessions.
+// RAYMAN2_HEALTH_FLOAT=50 writes that bit pattern.
+//
+// The "highest seen so far" default works unchanged for floats, and not by
+// accident: for positive IEEE-754 values the bit pattern orders the same way
+// the number does, so comparing the raw words as integers picks the largest
+// float. It would be wrong the moment health could go negative, which is why
+// it is written down rather than left to be rediscovered.
+bool configured_health_float(uint32_t& bits_out) {
+    static uint32_t bits = 0;
+    static const bool have = []() {
+        const char* env = std::getenv("RAYMAN2_HEALTH_FLOAT");
+        if (env == nullptr) {
+            return false;
+        }
+        const float value = static_cast<float>(std::atof(env));
+        std::memcpy(&bits, &value, sizeof(bits));
+        std::fprintf(stderr, "[rayman2] RAYMAN2_HEALTH_FLOAT: holding health at %.3f (0x%08X)\n",
+                     static_cast<double>(value), bits);
+        return true;
+    }();
+    bits_out = bits;
+    return have;
+}
+
+// An integer value to hold health at, for a game that keeps it as one.
+// RAYMAN2_HEALTH_VALUE; -1 means "whatever the highest value seen so far was".
 int32_t configured_health_value() {
     static const int32_t value = []() -> int32_t {
         if (const char* env = std::getenv("RAYMAN2_HEALTH_VALUE")) {
@@ -255,6 +284,12 @@ void apply(uint8_t* rdram) {
     }
 
     if (g_infinite_health.load(std::memory_order_relaxed)) {
+        uint32_t float_bits = 0;
+        if (configured_health_float(float_bits)) {
+            write_value(rdram, address, configured_health_width(), float_bits);
+            return;
+        }
+
         int32_t target = configured_health_value();
         if (target < 0) {
             // No value given: hold at the highest seen, which is what full
