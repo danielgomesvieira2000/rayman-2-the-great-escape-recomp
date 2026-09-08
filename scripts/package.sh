@@ -52,13 +52,17 @@ if [ -z "${MAJOR:-}" ]; then
 fi
 VERSION="${MAJOR}.${MINOR}.${PATCH}${SUFFIX}"
 
-# The build must be a release one: the configuration is recorded in every
-# session report, and a player's report saying RelWithDebInfo when the release
-# was announced as release is a question nobody should have to answer.
+# The build must be an optimised one with the frontend on. Release and
+# RelWithDebInfo both qualify, and both report themselves as "release" in a
+# session report, because that line is decided by NDEBUG and NDEBUG is defined
+# in both. RelWithDebInfo is preferred: it is the same optimisation with a PDB
+# beside it, and a PDB is what turns the addresses in a player's crash block
+# into function names.
 CONFIG="$(sed -n 's/^CMAKE_BUILD_TYPE:STRING=//p' "$BUILD/CMakeCache.txt" 2>/dev/null || true)"
 FRONTEND="$(sed -n 's/^RAYMAN2_ENABLE_FRONTEND:BOOL=//p' "$BUILD/CMakeCache.txt" 2>/dev/null || true)"
-if [ "$CONFIG" != "Release" ] || [ "$FRONTEND" != "ON" ]; then
-    echo "$BUILD is ${CONFIG:-?} with frontend ${FRONTEND:-?}; a release needs Release with the frontend ON" >&2
+if { [ "$CONFIG" != "Release" ] && [ "$CONFIG" != "RelWithDebInfo" ]; } || [ "$FRONTEND" != "ON" ]; then
+    echo "$BUILD is ${CONFIG:-?} with frontend ${FRONTEND:-?};" >&2
+    echo "a release needs Release or RelWithDebInfo, with the frontend ON" >&2
     exit 1
 fi
 
@@ -87,6 +91,30 @@ cp README.md LICENSE THIRD_PARTY_NOTICES.md "$OUT/"
   else
       echo "no zip and no powershell -- the folder is built, archive it by hand" >&2
   fi )
+
+# Symbols, as a separate download.
+#
+# They must come from the SAME link as the executable being shipped. A PDB from
+# a different build of the same source resolves addresses to confident, wrong
+# answers -- which is the failure 0.2.0-alpha's notes describe having already
+# been caught once, in the build stamp.
+if [ -f "$BUILD/rayman2-recomp.pdb" ]; then
+    SYMDIR="$ROOT/dist/${NAME%-windows-x64}-symbols"
+    rm -rf "$SYMDIR"
+    mkdir -p "$SYMDIR"
+    cp "$BUILD/rayman2-recomp.pdb" "$SYMDIR/"
+    ( cd "$ROOT/dist" && rm -f "$(basename "$SYMDIR").zip"
+      if command -v zip >/dev/null 2>&1; then
+          zip -qr "$(basename "$SYMDIR").zip" "$(basename "$SYMDIR")"
+      elif command -v powershell.exe >/dev/null 2>&1; then
+          powershell.exe -NoProfile -NonInteractive -Command               "Compress-Archive -Path '$(basename "$SYMDIR")' -DestinationPath '$(basename "$SYMDIR").zip' -Force" >/dev/null
+      fi )
+    rm -rf "$SYMDIR"
+    echo "  symbols: $SYMDIR.zip"
+else
+    echo "  NO SYMBOLS: $BUILD has no .pdb, so a crash address in a player's" >&2
+    echo "  report cannot be resolved to a function. Build RelWithDebInfo." >&2
+fi
 
 echo "packaged $VERSION from $BUILD ($CONFIG, frontend $FRONTEND)"
 echo "  $OUT"
