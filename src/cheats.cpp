@@ -47,6 +47,7 @@ std::atomic<int32_t> g_health_value{-1};
 
 const char* kTabId = "cheats";
 const char* kInfiniteHealth = "infinite_health";
+const char* kMemorySearch = "memory_search";
 
 // How many bytes the cheat writes. ONE by default.
 //
@@ -143,6 +144,8 @@ void write_value(uint8_t* rdram, uint32_t address, int width, uint32_t value) {
 
 } // namespace
 
+namespace rayman2 { void memory_search_set_enabled(bool on); }
+
 namespace rayman2::cheats {
 
 #ifdef RAYMAN2_ENABLE_FRONTEND
@@ -151,6 +154,14 @@ namespace rayman2::cheats {
 void create_tab() {
     recomp::config::Config& config =
         recompui::config::create_config_tab("Cheats", kTabId, false);
+
+    config.add_bool_option(
+        kMemorySearch,
+        "Memory Search (F5-F8)",
+        "Find an address by playing. F5 starts, F6 keeps what went down, F7 keeps "
+        "what did not change, F8 keeps what went up. Counts and results are written "
+        "to the session report in debug-report.",
+        false);
 
     config.add_bool_option(
         kInfiniteHealth,
@@ -186,6 +197,17 @@ void refresh() {
                         " after each hit, F7 after not being hit) and confirm it with"
                         " RAYMAN2_HEALTH_ADDR=0x........\n");
                 }
+            }
+        }
+    }
+#endif
+#ifdef RAYMAN2_ENABLE_FRONTEND
+    {
+        recomp::config::Config& config = recompui::config::get_config(kTabId);
+        if (config.has_option(kMemorySearch)) {
+            const auto value = config.get_option_value(kMemorySearch);
+            if (const bool* on = std::get_if<bool>(&value)) {
+                rayman2::memory_search_set_enabled(*on);
             }
         }
     }

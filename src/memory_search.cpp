@@ -38,6 +38,7 @@
 // The keys avoid F1 to F4, which are RT64's, and F9, which is the capture.
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -60,9 +61,32 @@ std::vector<uint32_t> g_snapshot;      // value at the last snapshot, per candid
 std::vector<uint32_t> g_candidates;    // offsets still in the running
 bool g_started = false;
 
+// Enabled by the Cheats tab, or by RAYMAN2_MEMSEARCH=1.
+//
+// The tab is the one that matters. The first version was environment-only, and
+// there was no way to tell from inside the game whether the variable had taken
+// -- so pressing the keys and seeing nothing happen was indistinguishable from
+// the tool being broken, which is exactly what happened to the first person who
+// tried it.
+std::atomic<bool> g_enabled_by_tab{false};
+
 bool enabled() {
-    static const bool on = std::getenv("RAYMAN2_MEMSEARCH") != nullptr;
-    return on;
+    static const bool by_env = std::getenv("RAYMAN2_MEMSEARCH") != nullptr;
+    return by_env || g_enabled_by_tab.load(std::memory_order_relaxed);
+}
+
+// Say so, once, when it becomes usable. A tool that is armed and silent looks
+// exactly like a tool that is not running.
+void announce_once() {
+    static bool announced = false;
+    if (announced) {
+        return;
+    }
+    announced = true;
+    std::fprintf(stderr,
+        "[rayman2] memsearch: ARMED. In a level at full health press F5, then after"
+        " each hit F6 (went down), and after a few seconds of taking no damage F7"
+        " (unchanged). Alternate F6 and F7; the count prints after every press.\n");
 }
 
 // RAYMAN2_MEMSEARCH=selftest -- drive the search on a timer instead of on keys.
@@ -157,12 +181,18 @@ void narrow(const uint8_t* rdram, Direction direction) {
 
 namespace rayman2 {
 
+// Set from the Cheats tab, so the search can be turned on without a relaunch.
+void memory_search_set_enabled(bool on) {
+    g_enabled_by_tab.store(on, std::memory_order_relaxed);
+}
+
 // Called once a frame from the thread that pumps events, which is where the
 // keyboard state is valid and where a capture is already polled from.
 void memory_search_poll(const uint8_t* rdram) {
     if (!enabled() || rdram == nullptr) {
         return;
     }
+    announce_once();
 
     if (selftest()) {
         using clock = std::chrono::steady_clock;
