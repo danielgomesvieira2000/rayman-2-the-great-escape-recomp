@@ -165,6 +165,8 @@ set(PORT_SOURCES
     # the headless build is what the pak was brought up under.
     src/controller_pak.cpp
     src/si_pak.cpp
+    # F9: capture a frame's worth of evidence for a graphics issue.
+    src/capture.cpp
     src/register_sections.cpp
     src/spin_yield.cpp
     src/crash_report.cpp

@@ -88,11 +88,78 @@ crashes in it. So it can be asked to prove itself:
 Each exercises one of the two paths and should leave a report containing a crash
 block. Neither can fire by accident.
 
+## Graphics issues
+
+A crash reports itself. A *graphics* bug does not: a screenshot says that
+something is wrong, never why. In a recompilation the why is nearly always one
+specific thing — a GBI command RT64's F3DEX 1.x path mishandles, a combiner or
+render mode, a texture tile setup, a framebuffer or VI interaction — and the
+distance between "I can see it" and "I can fix it" is knowing *which draw call*.
+Everything here is about closing that distance cheaply.
+
+### Press F9 while it is on screen
+
+One keypress writes, into `debug-report/captures/<time>/`:
+
+  * `screen.bmp` — what you were looking at;
+  * `vi-framebuffer.bin` — what the game actually drew, straight out of RDRAM,
+    before any scaling or widening. The difference between the two is itself
+    diagnostic: a defect present in both came from the game or the display list,
+    one present only on screen came from the renderer. Convert it with
+    `tools/fb_to_png.py`, using the dimensions the stub records;
+  * `ISSUE.md` — a filled-in issue stub carrying every graphics setting that was
+    in force, so "does it change with resolution, aspect or antialiasing" never
+    has to be asked.
+
+Evidence taken at the moment is worth far more than evidence reconstructed
+afterwards, when the spot is gone and the settings have been fiddled with.
+
+### The three-toggle triage
+
+Thirty seconds, one setting at a time in the Graphics tab, and it eliminates
+most of the search space before anyone reads code:
+
+  * **Internal resolution** — if the defect scales with it, it is a renderer or
+    upscaling issue rather than a display-list one.
+  * **Aspect ratio**, Expand against Original — if it only appears widened, it
+    is culling or 2D anchoring.
+  * **Antialiasing** off — if it vanishes, it is a coverage or edge issue.
+
+### RT64's frame inspector
+
+The port ships a full frame debugger and it is switched off by default. Turn on
+**Developer Mode** in the Graphics tab, then:
+
+    F1   the frame inspector: pause, and walk framebuffer pairs -> projections
+         -> draw calls. Highlighting a call shows which geometry it is; tiles,
+         textures and samplers are inspectable, and there is a free camera.
+    F3   view RDRAM directly
+    F4   texture replacements
+
+You do not have to understand what you are looking at. Pausing on the bad frame
+and screenshotting that panel is already far more useful than a screenshot of
+the game, and one line — "draw call 37 in projection 1 is the water" — is
+usually enough to act on immediately.
+
+### Filing it
+
+Copy `docs/issues/TEMPLATE.md` to `docs/issues/NNN-short-name.md`, drop the
+capture folder's contents beside it, and commit. In the repository rather than
+in a message, because it survives the session, the notes and the images can be
+read together, and once it is fixed the file is the regression record.
+
+The single most valuable thing to include is a way to reproduce it: a Controller
+Pak image parked just before the spot, so reaching it costs seconds instead of
+half an hour.
+
 ## Environment variables
 
     RAYMAN2_SELFTEST=crash|terminate   prove the crash reporting works (above)
     RAYMAN2_NO_MIRROR=1                do not mirror output into the report;
                                        errors and crashes are still recorded
+    F9  (a key, not a variable)        capture a graphics issue: screenshot,
+                                       VI framebuffer, settings and an issue
+                                       stub, into debug-report/captures
     RAYMAN2_PRESENT=skipbuffering      presentation mode; unlocks RT64 frame
                     |presentearly      interpolation, but tears on this game.
                                        Default (unset) is console.

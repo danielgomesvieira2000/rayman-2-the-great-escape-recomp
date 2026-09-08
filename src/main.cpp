@@ -29,6 +29,7 @@
 #include "ultramodern/threads.hpp"
 
 #include "controller_pak.h"
+#include "capture.h"
 #include "debug_report.h"
 
 #include "librecomp/game.hpp"
@@ -60,7 +61,16 @@ extern "C" void recomp_entrypoint(uint8_t* rdram, recomp_context* ctx);
 // The game's entry point, wrapped so that crossing into recompiled code is
 // visible in the log. This is the phase 03 gate: everything before it is host
 // setup, everything after it is Rayman 2's own code running.
+// The base of emulated RDRAM, remembered the moment the game gets it.
+//
+// Nothing else hands it to the port's own threads: the gfx callbacks take no
+// rdram argument, so a capture taken from the event pump would otherwise have
+// no way to read the framebuffer the game is presenting. This is the only place
+// the pointer arrives, and it does not move afterwards.
+std::atomic<uint8_t*> g_rdram{nullptr};
+
 extern "C" void rayman2_entrypoint(uint8_t* rdram, recomp_context* ctx) {
+    g_rdram.store(rdram, std::memory_order_release);
     std::fprintf(stderr, "[rayman2] entering recomp_entrypoint -- the game thread is running\n");
     recomp_entrypoint(rdram, ctx);
     std::fprintf(stderr, "[rayman2] recomp_entrypoint returned\n");
@@ -232,6 +242,11 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 
 // Pumps the OS event queue. Runs on the thread that created the window.
 void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
+    // F9: capture everything worth having about the frame on screen. See
+    // include/capture.h. This runs on the thread that pumps SDL events, which
+    // is where the keyboard state is valid.
+    rayman2::capture::poll_hotkey(g_rdram.load(std::memory_order_acquire));
+
     // Persist Controller Pak writes about once a second.
     //
     // This runs on the thread that pumps events rather than on the game thread,
@@ -692,6 +707,10 @@ int main(int argc, char** argv) {
         // This has to happen before the game starts, because the first thing it
         // does with the pak is read it.
         rayman2::pak::set_storage_directory(cfg);
+        // Captures land beside the session reports, so a player who has found
+        // one has found the other.
+        rayman2::capture::set_output_directory(
+            rayman2::report::path().empty() ? cfg : rayman2::report::path().parent_path());
         rayman2::report::add_context("config directory", cfg.string());
         std::fprintf(stderr, "[rayman2] config path: %s\n", cfg.string().c_str());
     }
