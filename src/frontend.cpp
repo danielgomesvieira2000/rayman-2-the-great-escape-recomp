@@ -161,10 +161,20 @@ void frontend_init() {
     // them and before finalize().
     recompinput::profiles::initialize_input_bindings();
 
-    // The prefab tabs. Rumble is offered because port 1 is a controller; gyro
-    // and mouse aim are not, because this game has no use for either.
+    // The prefab tabs. All three of these options are off, and rumble is the
+    // one that needs a reason: this port has no rumble to offer.
+    //
+    // Port 1 advertises a Controller Pak, and a controller can hold one pak.
+    // ultramodern's osMotorInit answers PFS_ERR_DEVICE unless the pak it finds
+    // is a Rumble Pak, so with saving supported the game never gets a motor to
+    // drive -- exactly as it would not with the Rumble Pak taken out of a real
+    // controller. See docs/CONTROLLER-PAK-FINDINGS.md, "What it cost: the
+    // Rumble Pak". A strength slider that cannot change anything is worse than
+    // no slider: it invites the player to conclude their controller is broken.
+    //
+    // Gyro and mouse aim are off because this game has no use for either.
     recompui::config::GeneralTabOptions general{};
-    general.has_rumble_strength   = true;
+    general.has_rumble_strength   = false;
     general.has_gyro_sensitivity  = false;
     general.has_mouse_sensitivity = false;
     recompui::config::create_general_tab(general);
