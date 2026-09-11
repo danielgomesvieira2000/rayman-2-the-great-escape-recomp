@@ -92,6 +92,7 @@ builds the host app but **cannot** build the MIPS patches — use Homebrew LLVM
 ```bash
 # 1. Dependencies, and the recompiler itself.
 git submodule update --init --recursive
+python tools/patch_rt64_debug_menu.py # the F1 debug menu's hook into RT64
 scripts/setup-splat.sh                # splat, in WSL or on Linux
 scripts/build-recompiler.sh           # -> ./N64Recomp, ./RSPRecomp
 
@@ -110,6 +111,15 @@ cmake --build build-cmake -j
 
 Re-run step 3 whenever the ELF or `recomp/rayman2.us.toml` changes, and steps
 2-3 whenever `recomp/symbol_addrs.txt` or the splat config changes.
+
+**Re-run `tools/patch_rt64_debug_menu.py` after any `git submodule update`.** It
+adds the one function pointer RT64 calls to let the port draw its own window
+inside the developer UI (`docs/DEBUG-MENU.md`), and it also unbinds F2, which
+upstream uses to toggle ray tracing for the whole session with nothing on screen
+to say so. `lib/RT64` is a submodule, so an update silently reverts both, and the
+port *links* against the symbol whether or not the menu is ever opened — a fresh
+clone that skipped this fails at link time rather than at runtime. The script is
+idempotent and safe to run at any point.
 
 **Two build configurations.** `-DRAYMAN2_ENABLE_FRONTEND=ON` (the default)
 builds with RecompFrontend's launcher and uses its RT64 context.

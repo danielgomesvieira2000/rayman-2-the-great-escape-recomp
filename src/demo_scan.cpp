@@ -30,6 +30,8 @@
 #include <cstring>
 #include <vector>
 
+#include "debug_status.h"
+
 namespace {
 
 // The N64's RDRAM, which is the whole of what the game can have put a flag in.
@@ -62,6 +64,22 @@ bool g_have_candidates = false;
 int g_idle_samples = 0;
 int g_busy_samples = 0;
 
+// What the debug menu reads. Everything above is touched only from the thread
+// that pumps events; the menu draws on the renderer's UI thread, so the numbers
+// it wants are published into atomics rather than read across the two. See
+// include/debug_status.h.
+std::atomic<size_t> g_published_candidates{0};
+std::atomic<bool> g_published_have_candidates{false};
+std::atomic<int> g_published_idle_samples{0};
+std::atomic<int> g_published_busy_samples{0};
+
+void publish() {
+    g_published_candidates.store(g_candidates.size(), std::memory_order_relaxed);
+    g_published_have_candidates.store(g_have_candidates, std::memory_order_relaxed);
+    g_published_idle_samples.store(g_idle_samples, std::memory_order_relaxed);
+    g_published_busy_samples.store(g_busy_samples, std::memory_order_relaxed);
+}
+
 bool enabled() {
     static const bool on = std::getenv("RAYMAN2_DEMOSCAN") != nullptr;
     return on;
@@ -84,6 +102,10 @@ inline uint32_t raw_word(const uint8_t* rdram, uint32_t offset) {
 
 
 void report(const char* what) {
+    // Every change to the scan's state ends here, so this is the one place
+    // the debug menu's copy has to be refreshed from.
+    publish();
+
     std::fprintf(stderr,
                  "[rayman2] demoscan: %s -- %zu candidates (title samples %d, demo samples %d)\n",
                  what, g_candidates.size(), g_idle_samples, g_busy_samples);
@@ -105,6 +127,7 @@ void take_idle_snapshot(const uint8_t* rdram) {
     }
     g_have_idle_snapshot = true;
     g_idle_samples = 1;
+    publish();
     std::fprintf(stderr, "[rayman2] demoscan: title-screen snapshot taken (%u words)\n", kWords);
 }
 
@@ -262,6 +285,18 @@ bool attract_mode_active(const uint8_t* rdram) {
 // Called from both renderers' send_dl, once per display list the game submits.
 void note_display_list() {
     g_display_lists.fetch_add(1, std::memory_order_relaxed);
+}
+
+// For the debug menu. See include/debug_status.h.
+DemoScanStatus demo_scan_status() {
+    DemoScanStatus out;
+    out.display_lists = g_display_lists.load(std::memory_order_relaxed);
+    out.enabled = enabled();
+    out.have_candidates = g_published_have_candidates.load(std::memory_order_relaxed);
+    out.candidates = g_published_candidates.load(std::memory_order_relaxed);
+    out.idle_samples = g_published_idle_samples.load(std::memory_order_relaxed);
+    out.busy_samples = g_published_busy_samples.load(std::memory_order_relaxed);
+    return out;
 }
 
 // Called once per frame from the thread that pumps events, which is where a

@@ -35,9 +35,13 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 
 #include "hle/rt64_application.h"
+
+#include "debug_menu.h"
+#include "debug_status.h"
 
 #include "ultramodern/config.hpp"
 #include "ultramodern/renderer_context.hpp"
@@ -240,7 +244,22 @@ RT64Context::RT64Context(uint8_t* rdram,
 
     const ultramodern::renderer::GraphicsConfig& cfg = ultramodern::renderer::get_graphics_config();
     app->userConfig.graphicsAPI    = to_rt64(cfg.api_option);
-    app->userConfig.developerMode  = developer_mode;
+    // Developer mode is forced on, exactly as the frontend build forces it in
+    // src/render_context.cpp, and for the same reason: F1 is the debug menu, and
+    // every path to it -- the Win32 subclass and SDL event filter RT64 installs,
+    // the key handler, State::inspect() at the far end -- is gated on this one
+    // flag, which is read here and never looked at again. A build where the menu
+    // cannot be opened is a build where the menu does not exist.
+    //
+    // RAYMAN2_DEVMODE=0 turns it off, the same spelling as the other build.
+    const char* devmode_env = std::getenv("RAYMAN2_DEVMODE");
+    const bool developer_disabled =
+        (devmode_env != nullptr) && (std::strcmp(devmode_env, "0") == 0);
+    (void)developer_mode;
+    app->userConfig.developerMode  = !developer_disabled;
+
+    // The port's own window inside that UI. A no-op when the menu is off.
+    rayman2::debug_menu::install();
 
     uint32_t thread_id = 0;
 #if defined(_WIN32)
@@ -314,6 +333,7 @@ void RT64Context::update_screen() {
         return;
     }
     g_frames.fetch_add(1, std::memory_order_relaxed);
+    rayman2::note_presented_frame();
     if (!quiet_boot()) {
         // update_screen is the VI thread and nothing else, so this bookkeeping
         // needs no synchronisation of its own.

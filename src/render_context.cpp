@@ -24,6 +24,9 @@
 
 #include "rhi/rt64_render_hooks.h"
 
+#include "debug_menu.h"
+#include "debug_status.h"
+
 // src/draw_distance.cpp and src/main.cpp
 namespace rayman2 {
     void narrow_pending_projections(uint8_t* rdram);
@@ -235,7 +238,15 @@ public:
     }
 
     void send_dummy_workload(uint32_t fb_address) override { inner_->send_dummy_workload(fb_address); }
-    void update_screen() override { inner_->update_screen(); }
+
+    // Counted for the debug menu, which shows this beside the display-list rate:
+    // the two together separate "the game has stopped drawing" from "the window
+    // has stopped painting", which look identical from the outside.
+    void update_screen() override {
+        inner_->update_screen();
+        rayman2::note_presented_frame();
+    }
+
     void shutdown() override { inner_->shutdown(); }
     uint32_t get_display_framerate() const override { return inner_->get_display_framerate(); }
     float get_resolution_scale() const override { return inner_->get_resolution_scale(); }
@@ -297,6 +308,11 @@ create_render_context(uint8_t* rdram,
         std::fprintf(stderr, "[rayman2] developer mode on: F1 frame inspector, "
                              "F3 view RDRAM, F4 texture replacements\n");
     }
+
+    // The port's own window inside the developer UI that the flag above turns
+    // on. install() must run before the first frame and does nothing when the
+    // menu is switched off, so it is unconditional here.
+    rayman2::debug_menu::install();
 
     auto context = recompui::renderer::create_render_context(
         rdram,

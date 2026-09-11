@@ -185,7 +185,11 @@ set(PORT_SOURCES
     # librecomp's messages and not only the port's.
     src/debug_report.cpp
     src/thread_sampler.cpp
-    src/debug_node.cpp)
+    src/debug_node.cpp
+    # F1: the port's own debug menu, drawn inside RT64's developer UI. Both
+    # builds -- a debug menu that only exists in a build made for it is a debug
+    # menu nobody has when they need it. See docs/DEBUG-MENU.md.
+    src/debug_menu.cpp)
 
 # The renderer context. With the frontend, RecompFrontend owns the RT64
 # application (its menus draw as an overlay and need the render hooks), so the
@@ -225,6 +229,10 @@ target_include_directories(rayman2-recomp PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/RT64/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/RT64/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/RT64/src/contrib"
+    # src/debug_menu.cpp draws into the ImGui context RT64 owns, so it needs
+    # RT64's bundled ImGui headers. The code itself comes from the rt64 target,
+    # which compiles ImGui into its own archive.
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/RT64/src/contrib/imgui"
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/RT64/src/contrib/hlslpp/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/lib/RT64/src/contrib/dxc/inc"
     ${SDL2_INCLUDE_DIRS})

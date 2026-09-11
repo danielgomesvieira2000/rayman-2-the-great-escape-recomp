@@ -45,6 +45,7 @@
 
 #include "recomp.h"
 #include "port_runtime.h"
+#include "debug_status.h"
 
 namespace {
 
@@ -377,6 +378,31 @@ namespace rayman2 {
 // 4x4 of s15.16 stored split, sixteen halfwords of integer parts followed by
 // sixteen of fractional parts, so [0][0] is the halfword at 0 and the halfword
 // at 32.
+// For the debug menu. See include/debug_status.h.
+//
+// Everything here is either an atomic or guarded by g_pending_mutex, because
+// this is called from the renderer's UI thread while the guPerspective hook is
+// running on the game's.
+DrawDistanceStatus draw_distance_status() {
+    DrawDistanceStatus out;
+    out.scale = draw_distance_scale();
+    out.scale_from_env = g_from_env.load(std::memory_order_relaxed);
+    out.first_aspect = g_base_aspect.load(std::memory_order_relaxed);
+    out.last_aspect = g_observed_aspect.load(std::memory_order_relaxed);
+    out.window_aspect = g_display_aspect.load(std::memory_order_relaxed);
+    out.fov_widening = g_fov_undo.load(std::memory_order_relaxed);
+    // g_perspective_mtx is deliberately NOT reported. It is a handover slot
+    // rather than a state: the start hook puts the matrix pointer in it and
+    // rayman2_record_projection_matrix exchanges it back to zero, so anything
+    // reading it from outside sees zero almost always and draws exactly the
+    // wrong conclusion from that.
+    {
+        std::lock_guard<std::mutex> lock(g_pending_mutex);
+        out.pending_projections = g_pending.size();
+    }
+    return out;
+}
+
 void narrow_pending_projections(uint8_t* rdram) {
     // RAYMAN2_NARROW=0 leaves the wide matrix in place all the way to RT64.
     // Worth having as a switch: if the winking-out is RT64 clipping against the

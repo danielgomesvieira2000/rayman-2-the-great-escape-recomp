@@ -18,6 +18,7 @@
 #include "ultramodern/renderer_context.hpp"
 
 #include "debug_report.h"
+#include "debug_status.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -252,6 +253,14 @@ const char* name_of(ultramodern::renderer::RefreshRate value) {
 
 namespace rayman2::capture {
 
+// For the debug menu. See include/debug_status.h.
+Status status() {
+    Status out;
+    out.directory = g_dir;
+    out.taken = g_count.load(std::memory_order_relaxed);
+    return out;
+}
+
 void set_output_directory(const fs::path& debug_report_dir) {
     if (debug_report_dir.empty()) {
         return;
@@ -319,8 +328,8 @@ void take(uint8_t* rdram, const char* reason) {
              << "\n"
              << "## The frame itself\n"
              << "\n"
-             << "Relaunch with RAYMAN2_DEVMODE=1 and press F1 to open RT64's\n"
-             << "developer UI (there is no checkbox for it). Pause on the bad frame and\n"
+             << "Press F1 for the debug menu -- RT64's frame inspector and the port's\n"
+             << "own readout, both on in every build. Pause on the bad frame and\n"
              << "walk the draw calls; a screenshot of that panel, or just \"draw call N in projection M is the\n"
              << "thing that looks wrong\", turns a day of guessing into an hour.\n"
              << "\n"

@@ -30,6 +30,7 @@
 
 #include "controller_pak.h"
 #include "capture.h"
+#include "debug_menu.h"
 #include "debug_report.h"
 
 #include "librecomp/game.hpp"
@@ -1080,6 +1081,11 @@ int main(int argc, char** argv) {
     // boundary on its way out and the process fail-fasts with no message, so
     // the exception is caught and reported here instead of being guessed at.
     rayman2_start_thread_sampler();
+
+    // The debug menu's one startup call. It only reads whether the menu is
+    // wanted and starts the uptime clock, but it has to happen before the
+    // renderer is created, because install() runs while RT64 is being built.
+    rayman2::debug_menu::init();
 
     std::fprintf(stderr, "[rayman2] entering recomp::start\n");
     try {

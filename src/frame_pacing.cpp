@@ -51,6 +51,8 @@
 
 #include "ultramodern/ultramodern.hpp"
 
+#include "debug_status.h"
+
 namespace rayman2 {
     // src/demo_scan.cpp -- the attract-mode flag, and where it came from.
     bool attract_mode_active(const uint8_t* rdram);
@@ -219,6 +221,20 @@ namespace rayman2 {
 // graphics tasks, audio tasks are dispatched from a different queue on a
 // different thread (events.cpp enqueues an SpTaskAction only for M_GFXTASK), and
 // the game itself is blocked waiting for exactly the completion being delayed.
+// Presented frames, counted for the debug menu.
+//
+// Separate from note_presented below, which is the pacing probe and returns
+// immediately unless RAYMAN2_PACEPROBE is set. This one always counts, because
+// "is the renderer still putting frames on the screen" is the first thing to
+// look at when the picture stops moving, and it must not depend on having
+// thought to set a variable before launch.
+std::atomic<uint64_t> g_presented{0};
+
+// For the debug menu. See include/debug_status.h.
+void note_presented_frame() {
+    g_presented.fetch_add(1, std::memory_order_relaxed);
+}
+
 // Called from the renderer's draw hook, once per frame that reaches the screen.
 void note_presented() {
     static const bool on = std::getenv("RAYMAN2_PACEPROBE") != nullptr;
@@ -252,6 +268,18 @@ clock_type::duration pace_margin() {
         return std::chrono::duration_cast<clock_type::duration>(std::chrono::milliseconds(ms));
     }();
     return margin;
+}
+
+// For the debug menu. See include/debug_status.h. Placed here rather than with
+// the other two above because it reads pace_margin(), which is defined just
+// above this line.
+FramePacingStatus frame_pacing_status() {
+    FramePacingStatus out;
+    out.fields_per_frame = fields_per_frame();
+    out.margin_ms = static_cast<int>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(pace_margin()).count());
+    out.presented = g_presented.load(std::memory_order_relaxed);
+    return out;
 }
 
 // When the RDP should appear to have finished this frame.

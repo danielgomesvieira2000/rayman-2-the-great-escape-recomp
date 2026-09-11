@@ -250,24 +250,23 @@ most of the search space before anyone reads code:
 
 ### RT64's frame inspector
 
-The port ships a full frame debugger and it is switched off by default. It is
-also not where you would look for it: RecompFrontend registers the "Dev Mode"
-option as *hidden*, so there is no checkbox in the Graphics tab, and it cannot
-be turned on while the game is running — RT64 installs the message hook that
-delivers these keys when the renderer is built, from a value read once, so
-flipping it later does nothing at all and looks exactly like the feature not
-existing.
+**Press F1.** It is on in every build, released or not, with nothing set
+beforehand — see [DEBUG-MENU.md](DEBUG-MENU.md), which also covers the port's own
+window that opens beside it.
 
-Launch with it on instead:
-
-    RAYMAN2_DEVMODE=1
-
-(or set `"developer_mode": true` in `graphics.json` to have it on permanently).
-The port prints a line confirming it. Then:
+It has to be on unconditionally rather than offered as a setting. RecompFrontend
+registers the "Dev Mode" option as *hidden*, so there is no checkbox in the
+Graphics tab to find; and it cannot be turned on while the game is running,
+because RT64 installs the message hook that delivers these keys when the renderer
+is built, from a value read once. Flipping it later does nothing at all and looks
+exactly like the feature not existing. `RAYMAN2_DEVMODE=0` turns it off.
 
     F1   the frame inspector: pause, and walk framebuffer pairs -> projections
          -> draw calls. Highlighting a call shows which geometry it is; tiles,
-         textures and samplers are inspectable.
+         textures and samplers are inspectable. The port's own readout opens
+         with it.
+    F2   deliberately unbound -- upstream RT64 toggles ray tracing for the whole
+         session here, with nothing on screen to say so
     F3   view RDRAM directly
     F4   pause and resume the frame
 
@@ -313,8 +312,16 @@ half an hour.
     F9  (a key, not a variable)        capture a graphics issue: screenshot,
                                        VI framebuffer, settings and an issue
                                        stub, into debug-report/captures
-    RAYMAN2_DEVMODE=1                  RT64's developer UI and frame inspector
-                                       on F1 (there is no checkbox for this)
+    F1  (a key, not a variable)        the debug menu: RT64's Game editor and
+                                       the port's own read-only readout of
+                                       every facility below. On in every build;
+                                       see docs/DEBUG-MENU.md
+    RAYMAN2_DEBUGMENU=0                turn the port's half of F1 off; RT64's
+                                       Game editor stays
+    RAYMAN2_DEVMODE=0                  turn F1 off entirely. It is ON by
+                                       default in both builds, because a debug
+                                       menu that needs a relaunch to reach is
+                                       one nobody has when they need it
     RAYMAN2_AUTOSTART=1                start the game without waiting for the
                                        launcher; what makes the shipped build
                                        scriptable (scripts/soak.sh)

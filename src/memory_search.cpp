@@ -48,6 +48,8 @@
 
 #include "SDL.h"
 
+#include "debug_status.h"
+
 namespace {
 
 constexpr uint32_t kRamSize = 0x800000;
@@ -60,6 +62,20 @@ constexpr size_t kPrintLimit = 32;
 std::vector<uint32_t> g_snapshot;      // value at the last snapshot, per candidate
 std::vector<uint32_t> g_candidates;    // offsets still in the running
 bool g_started = false;
+
+// The two vectors above are written from the thread that pumps events and the
+// debug menu reads them from the renderer's UI thread, so what it reads is
+// published here instead. Reading g_candidates.size() across threads while
+// narrow() is swapping the vector is a data race, and a debug readout is not
+// worth one -- the cost of avoiding it is two relaxed stores per keypress.
+std::atomic<size_t> g_published_candidates{0};
+std::atomic<size_t> g_narrowings{0};
+std::atomic<bool> g_published_started{false};
+
+void publish() {
+    g_published_candidates.store(g_candidates.size(), std::memory_order_relaxed);
+    g_published_started.store(g_started, std::memory_order_relaxed);
+}
 
 // RAYMAN2_MEMSEARCH=1. It announces itself when armed, because an environment
 // variable that did not take looks exactly like a tool that is broken.
@@ -128,6 +144,8 @@ void start(const uint8_t* rdram) {
         g_snapshot.push_back(read_word(rdram, i * 4));
     }
     g_started = true;
+    g_narrowings.store(0, std::memory_order_relaxed);
+    publish();
     std::fprintf(stderr, "[rayman2] memsearch: started -- %zu words remembered."
                          " Now change the value and press F6 (went down),"
                          " F7 (unchanged) or F8 (went up).\n", g_candidates.size());
@@ -165,6 +183,8 @@ void narrow(const uint8_t* rdram, Direction direction) {
 
     g_candidates.swap(kept_offsets);
     g_snapshot.swap(kept_values);
+    g_narrowings.fetch_add(1, std::memory_order_relaxed);
+    publish();
     report(direction == Direction::Down ? "went down"
          : direction == Direction::Same ? "unchanged"
                                         : "went up");
@@ -190,7 +210,7 @@ void poll_freeze(uint8_t* rdram) {
             return out;
         }
         const char* p = env;
-        while (*p != ' ' && out.size() < 16) {
+        while (*p != '\0' && out.size() < 16) {
             char* end = nullptr;
             const unsigned long value = std::strtoul(p, &end, 0);
             if (end == p) {
@@ -239,6 +259,16 @@ namespace rayman2 {
 // Called once a frame from the thread that pumps events, which is where the
 // keyboard state is valid and where a capture is already polled from.
 // RAYMAN2_FREEZE, which needs to write. Separate from the search, which does not.
+// For the debug menu. See include/debug_status.h.
+MemorySearchStatus memory_search_status() {
+    MemorySearchStatus out;
+    out.enabled = enabled();
+    out.started = g_published_started.load(std::memory_order_relaxed);
+    out.candidates = g_published_candidates.load(std::memory_order_relaxed);
+    out.narrowings = g_narrowings.load(std::memory_order_relaxed);
+    return out;
+}
+
 void memory_freeze_poll(uint8_t* rdram) {
     if (rdram == nullptr) {
         return;
