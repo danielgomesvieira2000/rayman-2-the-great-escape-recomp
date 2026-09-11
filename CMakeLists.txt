@@ -270,10 +270,18 @@ set_target_properties(rayman2-recomp PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 if(RAYMAN2_ENABLE_FRONTEND)
-    # recompui resolves assets as <exe dir>/assets/<name> and throws during
-    # renderer bring-up if the registered primary font is not there. The throw
-    # escapes through a noexcept boundary, so the failure mode is a silent
-    # fail-fast exit with no message at all -- worth staging carefully.
+    # recompui resolves assets as the RELATIVE path assets/<name>, against the
+    # process working directory -- get_asset_path builds it from
+    # get_program_path(), which is empty on Windows. So staging them next to the
+    # executable is only half the job; src/main.cpp enters the executable's
+    # directory at startup so that the relative lookup lands here. Say it that
+    # way round: an earlier version of this comment claimed recompui resolved
+    # against the executable's directory, and that is exactly why the fonts
+    # being missing from a terminal launch read as impossible.
+    #
+    # A missing asset is not always loud, either. The registered primary font
+    # throws during renderer bring-up, and the throw escapes through a noexcept
+    # boundary, so that one fail-fasts with no message at all.
     #
     # The fonts come from RmlUi's samples (SIL Open Font License 1.1); they are
     # copied at build time rather than committed, so no font binary lives in

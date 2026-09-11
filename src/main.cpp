@@ -775,6 +775,46 @@ int main(int argc, char** argv) {
     // exit (0xC0000409) that discards anything still sitting in a buffer.
     std::setvbuf(stderr, nullptr, _IONBF, 0);
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+
+    // Run from the executable's own directory, because the frontend's assets
+    // are found by a RELATIVE path and nothing else fixes that here.
+    //
+    // recompui::file::get_asset_path builds "assets/<name>" from
+    // get_program_path(), which returns an empty path on Windows -- so every
+    // font, icon and stylesheet it loads is resolved against the process
+    // working directory. Launched from Explorer that is the executable's
+    // folder and everything is found; launched from a terminal, a debugger, or
+    // a shortcut whose "Start in" differs, it is not, and the frontend reports
+    //
+    //     Failed to load font face from assets\LatoLatin-Regular.ttf
+    //     No font face defined. Ensure ... 'LatoLatin' [bold] has been loaded
+    //
+    // and draws its menus with no text. The same relative lookup decides where
+    // portable.txt is looked for, so this also makes that mean "beside the
+    // executable", which is what it is documented to mean.
+    //
+    // Fixing it in recompui would be the better place, but RecompFrontend is
+    // consumed as an unforked submodule, so the port does it here instead.
+    //
+    // Any path on the command line has to be resolved BEFORE the change, or a
+    // relative one -- scripts/soak.sh passes `rom.z64` -- would afterwards be
+    // looked for beside the executable rather than where it was typed.
+    std::filesystem::path rom_argument;
+    if (argc > 1) {
+        std::error_code ec;
+        rom_argument = std::filesystem::absolute(std::filesystem::path(argv[1]), ec);
+        if (ec) {
+            rom_argument = std::filesystem::path(argv[1]);
+        }
+    }
+    {
+        std::error_code ec;
+        std::filesystem::current_path(executable_directory(), ec);
+        if (ec) {
+            std::fprintf(stderr, "[rayman2] could not enter the executable's directory (%s);"
+                                 " the frontend may not find its fonts\n", ec.message().c_str());
+        }
+    }
     // Open this session's debug report before the first line is printed, so
     // that everything from here on -- the port's own output, librecomp's and
     // RT64's -- is mirrored into it, and so the crash reporter installed below
@@ -884,7 +924,7 @@ int main(int argc, char** argv) {
                  : "none stored yet -- the launcher will ask for one");
 
     if (!have_rom && argc > 1) {
-        have_rom = select_and_report(std::filesystem::path(argv[1]), game_id);
+        have_rom = select_and_report(rom_argument, game_id);
     }
 
 #ifndef RAYMAN2_ENABLE_FRONTEND
